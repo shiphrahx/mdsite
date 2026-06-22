@@ -100,6 +100,30 @@ export async function build(srcDir, opts = {}) {
   const seenOutputs = new Map();
   let pageCount = 0;
 
+  // Pre-compute clean URL for every source .md path, so links between
+  // pages can be rewritten. Keys are normalized forward-slash paths.
+  const urlMap = new Map();
+  for (const rel of mdFiles) {
+    const norm = rel.split(path.sep).join('/');
+    urlMap.set(norm, urlFor(outputPathFor(rel), base));
+  }
+
+  // Build a per-file link rewriter: resolve a relative href against the
+  // current file's dir; if it points at a known .md page, swap in its URL.
+  const makeLinkRewrite = (rel) => (href) => {
+    // Leave absolute URLs, anchors, mailto, protocol-relative untouched.
+    if (/^([a-z]+:)?\/\//i.test(href) || href.startsWith('#') || href.startsWith('mailto:')) {
+      return href;
+    }
+    const [pathPart, hash = ''] = href.split('#');
+    if (!/\.(md|markdown)$/i.test(pathPart)) return href;
+    const fromDir = path.posix.dirname(rel.split(path.sep).join('/'));
+    const target = path.posix.normalize(path.posix.join(fromDir, pathPart));
+    const url = urlMap.get(target);
+    if (!url) return href; // dangling link — leave as-is
+    return hash ? `${url}#${hash}` : url;
+  };
+
   // Render markdown pages.
   for (const rel of mdFiles) {
     const raw = await fs.readFile(path.join(src, rel), 'utf8');
@@ -116,7 +140,7 @@ export async function build(srcDir, opts = {}) {
 
     if (data.draft === true) continue;
 
-    const { html, headings } = render(content);
+    const { html, headings } = render(content, { linkRewrite: makeLinkRewrite(rel) });
     const title = data.title || firstH1(headings) || path.parse(rel).name;
 
     const outRel = outputPathFor(rel);
