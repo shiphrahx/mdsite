@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en" data-theme-default="{theme}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{page_title}</title>
+<meta name="description" content="{description}">
+<link rel="stylesheet" href="{base}assets/style.css">
+<script>
+// Apply persisted/preferred theme before paint to avoid a flash.
+(function () {{
+  try {{
+    var saved = localStorage.getItem('mdsite-theme');
+    var def = document.documentElement.getAttribute('data-theme-default') || 'auto';
+    var theme = saved || def;
+    if (theme === 'auto') {{
+      theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }}
+    document.documentElement.setAttribute('data-theme', theme);
+  }} catch (e) {{}}
+}})();
+</script>
+</head>
+<body>
+<header class="site-header">
+  <button class="nav-toggle" aria-label="Toggle navigation" title="Menu">☰</button>
+  <a class="site-title" href="{base}">{site_title}</a>
+  <div class="search">
+    <input type="search" id="search-input" placeholder="Search…" autocomplete="off" aria-label="Search">
+    <div id="search-results" class="search-results" hidden></div>
+  </div>
+  <button class="theme-toggle" aria-label="Toggle dark mode" title="Toggle theme">◐</button>
+</header>
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+    <nav class="nav-tree">
+{nav_html}
+    </nav>
+  </aside>
+  <main class="content">
+    <article class="markdown-body">
+{content}
+    </article>
+    <nav class="prev-next">
+{prev_next_html}
+    </nav>
+    <footer class="page-footer">{footer}</footer>
+  </main>
+  <aside class="toc" id="toc">
+{toc_html}
+  </aside>
+</div>
+<script src="{base}assets/search.js" defer></script>
+<script src="{base}assets/app.js" defer></script>
+{live_reload}
+</body>
+</html>

@@ -10,6 +10,10 @@ import frontmatter
 from .config import load_config, make_exclude_matcher
 from .nav import Page, build_nav, is_index_file, prev_next_map
 from .render import first_h1, render, slugify
+from .layout import (
+    render_nav, render_page, render_prev_next, render_toc, write_assets,
+)
+from .search import write_search_index, write_sitemap
 
 MD_EXT = {".md", ".markdown"}
 
@@ -49,18 +53,6 @@ def url_for(out_path: str, base: str) -> str:
     return joined or "/"
 
 
-def _page_shell(title: str, body: str) -> str:
-    """Minimal page shell. Replaced by the full template module later."""
-    from html import escape
-    return (
-        "<!doctype html>\n<html lang=\"en\">\n<head>\n"
-        "<meta charset=\"utf-8\">\n"
-        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
-        f"<title>{escape(title)}</title>\n</head>\n<body>\n<main>\n"
-        f"{body}\n</main>\n</body>\n</html>\n"
-    )
-
-
 def _make_link_rewrite(rel: str, url_map: dict):
     """Per-file rewriter: resolve a relative .md href to its clean URL."""
     from_dir = PurePosixPath(rel).parent
@@ -90,7 +82,7 @@ def _make_link_rewrite(rel: str, url_map: dict):
     return rewrite
 
 
-def build(src_dir: str, opts: dict | None = None) -> dict:
+def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict:
     opts = opts or {}
     src = Path(src_dir).resolve()
     out = Path(opts.get("out", "./dist")).resolve()
@@ -170,11 +162,32 @@ def build(src_dir: str, opts: dict | None = None) -> dict:
     tree, ordered = build_nav(pages)
     neighbors = prev_next_map(ordered)
 
-    # Pass 2: write each page.
+    theme = config.get("theme", "auto")
+    footer = config.get("footer", "")
+    description = config.get("description", "")
+
+    # Pass 2: assemble + write each page with full template context.
     for rec in records:
+        nav_html = render_nav(tree, rec["url"], base)
+        toc_html = render_toc(rec["headings"])
+        nb = neighbors.get(rec["url"], {"prev": None, "next": None})
+        prev_next_html = render_prev_next(nb["prev"], nb["next"], base)
+        page_html = render_page(
+            page_title=f'{rec["title"]} · {site_title}' if rec["title"] != site_title else site_title,
+            site_title=site_title,
+            description=description,
+            content=rec["html"],
+            nav_html=nav_html,
+            toc_html=toc_html,
+            prev_next_html=prev_next_html,
+            footer=footer,
+            theme=theme,
+            base=base,
+            live_reload=live_reload,
+        )
         out_abs = out / rec["out_rel"]
         out_abs.parent.mkdir(parents=True, exist_ok=True)
-        out_abs.write_text(_page_shell(rec["title"], rec["html"]), encoding="utf-8")
+        out_abs.write_text(page_html, encoding="utf-8")
 
     # Copy static assets verbatim.
     for rel in assets:
@@ -184,7 +197,10 @@ def build(src_dir: str, opts: dict | None = None) -> dict:
         out_abs.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src / rel, out_abs)
 
+    # Bundled CSS/JS assets + search index + sitemap.
+    write_assets(out)
+    write_search_index(out, records)
+    write_sitemap(out, [r["url"] for r in records], base)
+
     print(f"Built {len(records)} page(s) -> {out}")
-    # tree/neighbors/site_title wired into templates in the next step.
-    _ = (tree, neighbors, site_title, config)
     return {"page_count": len(records), "out": str(out)}
