@@ -131,6 +131,12 @@ class _RebuildHandler(FileSystemEventHandler):
 
 def serve(src_dir: str, opts: dict | None = None) -> None:
     opts = dict(opts or {})
+    # The dev server roots the site at "/", so output URLs must be root-relative
+    # regardless of any --base meant for production subfolder hosting. Otherwise
+    # /docs/assets/... links 404 against a server rooted at /.
+    if opts.get("base", "/") not in ("/", "", None):
+        print(f"note: ignoring --base {opts['base']} in serve (dev server roots at /)")
+    opts["base"] = "/"
     preferred = opts.pop("port", 3000)
     out = Path(opts.get("out", "./dist")).resolve()
     src = Path(src_dir).resolve()
