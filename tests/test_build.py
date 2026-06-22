@@ -191,6 +191,31 @@ def test_readme_used_as_index_when_alone(tmp_path):
     assert "Guide Readme" in (out / "guide" / "index.html").read_text(encoding="utf-8")
 
 
+def test_base_applied_to_output(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    _write(src / "page.md", "# Page\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True, "base": "/docs/"})
+    home = (out / "index.html").read_text(encoding="utf-8")
+    # Asset + nav URLs carry the base prefix.
+    assert "/docs/assets/style.css" in home
+    assert 'href="/docs/page/"' in home
+    idx = json.loads((out / "search-index.json").read_text(encoding="utf-8"))
+    assert "/docs/page/" in {r["url"] for r in idx}
+
+
+def test_base_normalized_without_slashes(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    out = tmp_path / "out"
+    # "docs" (no leading/trailing slash) must normalize to "/docs/".
+    build(str(src), {"out": str(out), "clean": True, "base": "docs"})
+    home = (out / "index.html").read_text(encoding="utf-8")
+    assert "/docs/assets/style.css" in home
+    assert "/docsassets/" not in home
+
+
 def test_performance_500_files(tmp_path):
     src = tmp_path / "src"
     _write(src / "index.md", "# Home\n")

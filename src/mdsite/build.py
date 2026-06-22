@@ -86,7 +86,14 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
     opts = opts or {}
     src = Path(src_dir).resolve()
     out = Path(opts.get("out", "./dist")).resolve()
-    base = opts.get("base", "/")
+    # Normalize base so template concatenation ("{base}assets/...") and clean
+    # URLs always agree: leading + trailing slash. Accepts "docs", "/docs",
+    # "/docs/" -> "/docs/".
+    base = opts.get("base", "/") or "/"
+    if not base.startswith("/"):
+        base = "/" + base
+    if not base.endswith("/"):
+        base = base + "/"
 
     if not src.exists():
         raise RuntimeError(f"source folder not found: {src_dir}")
