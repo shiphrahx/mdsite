@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
+import urllib.request
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -189,6 +192,74 @@ def test_readme_used_as_index_when_alone(tmp_path):
     assert result["page_count"] == 2
     assert (out / "guide" / "index.html").exists()
     assert "Guide Readme" in (out / "guide" / "index.html").read_text(encoding="utf-8")
+
+
+def test_link_rewrite_parent_traversal(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    _write(src / "top.md", "# Top\n")
+    # ../ climbs out of guide/ back to the source root.
+    _write(src / "guide" / "intro.md", "# Intro\n\n[up](../top.md)\n[home](../index.md)\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    body = (out / "guide" / "intro" / "index.html").read_text(encoding="utf-8")
+    assert 'href="/top/"' in body
+    assert 'href="/"' in body
+
+
+def test_search_index_shape(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n\nHello **world** with a `code` span.\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    idx = json.loads((out / "search-index.json").read_text(encoding="utf-8"))
+    assert isinstance(idx, list)
+    rec = idx[0]
+    assert set(rec) == {"title", "url", "text"}
+    # Body is tag-stripped plain text.
+    assert "<" not in rec["text"]
+    assert "Hello world with a code span" in rec["text"]
+
+
+# ---- serve mode ----
+
+def test_live_reload_snippet_injected(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True}, live_reload="<!--LR-->")
+    assert "<!--LR-->" in (out / "index.html").read_text(encoding="utf-8")
+
+
+def test_reload_hub_broadcast():
+    from mdsite.serve import _ReloadHub
+    hub = _ReloadHub()
+    q = hub.subscribe()
+    hub.broadcast()
+    assert q.get(timeout=1) == "reload"
+    hub.unsubscribe(q)
+    hub.broadcast()  # no subscribers left; must not raise
+
+
+def test_serve_handler_serves_clean_urls(tmp_path):
+    from mdsite.serve import _ReloadHub, _find_free_port, _make_handler
+
+    root = tmp_path / "site"
+    (root / "foo").mkdir(parents=True)
+    (root / "index.html").write_text("<h1>home</h1>", encoding="utf-8")
+    (root / "foo" / "index.html").write_text("<h1>foo page</h1>", encoding="utf-8")
+
+    port = _find_free_port(8999)
+    httpd = ThreadingHTTPServer(("127.0.0.1", port), _make_handler(root, _ReloadHub()))
+    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+    t.start()
+    try:
+        base = f"http://127.0.0.1:{port}"
+        assert "home" in urllib.request.urlopen(base + "/", timeout=2).read().decode()
+        # Clean URL /foo/ resolves to foo/index.html.
+        assert "foo page" in urllib.request.urlopen(base + "/foo/", timeout=2).read().decode()
+    finally:
+        httpd.shutdown()
 
 
 def test_base_applied_to_output(tmp_path):
