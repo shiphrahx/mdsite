@@ -19,6 +19,9 @@ dependencies = [
     "watchdog>=4.0",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
 [project.scripts]
 mdsite = "mdsite.cli:_entry"
 
