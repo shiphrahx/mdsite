@@ -166,9 +166,12 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
     footer = config.get("footer", "")
     description = config.get("description", "")
 
+    # Nav tree is identical on every page (current page highlighted client-
+    # side), so render it once instead of per page.
+    nav_html = render_nav(tree, base)
+
     # Pass 2: assemble + write each page with full template context.
     for rec in records:
-        nav_html = render_nav(tree, rec["url"], base)
         toc_html = render_toc(rec["headings"])
         nb = neighbors.get(rec["url"], {"prev": None, "next": None})
         prev_next_html = render_prev_next(nb["prev"], nb["next"], base)

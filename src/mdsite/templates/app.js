@@ -29,6 +29,18 @@
     });
   }
 
+  // ---- Highlight current nav link (rendered once, marked client-side) ----
+  (function () {
+    var here = location.pathname.replace(/\/+$/, '/') || '/';
+    document.querySelectorAll('.nav-tree a').forEach(function (a) {
+      var href = a.getAttribute('href') || '';
+      var path = href.replace(/[?#].*$/, '');
+      if (path === here || (path !== '/' && here === path)) {
+        a.classList.add('current');
+      }
+    });
+  })();
+
   // ---- Collapsible folders (state persisted) ----
   var COLLAPSE_KEY = 'mdsite-collapsed';
   var collapsed = {};

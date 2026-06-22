@@ -19,23 +19,21 @@ def _load(name: str) -> str:
 _PAGE = _load("page.html")
 
 
-def render_nav(tree: NavNode, current_url: str, base: str) -> str:
-    """Render the sidebar nav tree as nested <ul>. Current page highlighted."""
+def render_nav(tree: NavNode, base: str) -> str:
+    """Render the sidebar nav tree as nested <ul>, once for the whole site.
+    The current page is highlighted client-side (app.js matches the URL), so
+    this output is identical on every page and can be computed a single time."""
 
     def render_node(node: NavNode, path: str) -> str:
         items: list[str] = []
-        # Folder landing link (if the folder has an index page).
         # Folders render as collapsible groups; pages as plain links.
         for child in node.children:
             child_path = f"{path}/{child.name}" if path else child.name
             label_url = child.url
             label = escape(child.title or child.name)
             inner = render_node(child, child_path)
-            current_cls = " current" if label_url == current_url else ""
             if label_url:
-                label_html = (
-                    f'<a class="folder-link{current_cls}" href="{label_url}">{label}</a>'
-                )
+                label_html = f'<a class="folder-link" href="{label_url}">{label}</a>'
             else:
                 label_html = f'<span class="folder-name">{label}</span>'
             items.append(
@@ -44,9 +42,8 @@ def render_nav(tree: NavNode, current_url: str, base: str) -> str:
                 f"{inner}</li>"
             )
         for page in node.pages:
-            cls = " current" if page.url == current_url else ""
             items.append(
-                f'<li><a class="{cls.strip()}" href="{page.url}">{escape(page.title)}</a></li>'
+                f'<li><a href="{page.url}">{escape(page.title)}</a></li>'
             )
         if not items:
             return ""
