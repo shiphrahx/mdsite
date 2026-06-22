@@ -59,6 +59,15 @@ def test_duplicate_heading_slugs_deduped():
     assert 'id="repeat-1"' in out.html
 
 
+def test_slug_dedup_handles_literal_suffix_collision():
+    # "Foo","Foo" -> foo, foo-1; then a literal "Foo 1" also slugs to foo-1
+    # and must be bumped again so every id stays unique.
+    out = render("# Foo\n\n# Foo\n\n# Foo 1\n")
+    slugs = [h.slug for h in out.headings]
+    assert slugs == ["foo", "foo-1", "foo-1-1"]
+    assert len(set(slugs)) == 3
+
+
 # ---- link handling ----
 
 def test_external_link_hardened():

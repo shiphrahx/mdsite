@@ -76,10 +76,6 @@ class Rendered:
     headings: list[Heading]
 
 
-_EXTERNAL = re.compile(r"^([a-z]+:)?//", re.IGNORECASE)
-_MD_LINK = re.compile(r"\.(md|markdown)$", re.IGNORECASE)
-
-
 def render(markdown: str, link_rewrite: Optional[Callable[[str], str]] = None) -> Rendered:
     """Render markdown to HTML. Injects heading ids + hover anchors, rewrites
     relative .md links via link_rewrite, hardens external links, lazy-loads
@@ -87,7 +83,7 @@ def render(markdown: str, link_rewrite: Optional[Callable[[str], str]] = None) -
     env: dict = {}
     tokens = _MD.parse(markdown, env)
     headings: list[Heading] = []
-    slug_counts: dict[str, int] = {}
+    used_slugs: set[str] = set()
 
     i = 0
     while i < len(tokens):
@@ -97,12 +93,15 @@ def render(markdown: str, link_rewrite: Optional[Callable[[str], str]] = None) -
             level = int(tok.tag[1:])
             inline = tokens[i + 1] if i + 1 < len(tokens) else None
             text = inline.content if inline and inline.type == "inline" else ""
-            slug = slugify(text)
-            if slug in slug_counts:
-                slug_counts[slug] += 1
-                slug = f"{slug}-{slug_counts[slug]}"
-            else:
-                slug_counts[slug] = 0
+            base_slug = slugify(text)
+            slug = base_slug
+            n = 0
+            # Guarantee global uniqueness, even against a literal heading whose
+            # text already equals an auto-suffixed slug (e.g. "Foo","Foo","Foo 1").
+            while slug in used_slugs:
+                n += 1
+                slug = f"{base_slug}-{n}"
+            used_slugs.add(slug)
             tok.attrSet("id", slug)
             headings.append(Heading(level=level, text=text, slug=slug))
             # Append a hover anchor link inside the heading's inline children.
