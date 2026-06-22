@@ -8,13 +8,25 @@ Point it at a folder of `.md` files and get a complete static site: sidebar nav
 mirroring your folder structure, light/dark mode, client-side search, syntax
 highlighting, and clean URLs.
 
+## Quick start
+
+```bash
+pip install mdsite
+mdsite init my-site      # scaffold sample content + config
+mdsite serve my-site     # live-reload dev server at http://127.0.0.1:3000
+mdsite build my-site     # write the static site to ./dist
+```
+
+Then publish `dist/` to any static host (GitHub Pages, Netlify, S3, nginx …).
+
 ## Features
 
 - **Folder structure → navigation.** Nested folders become a collapsible sidebar
   tree; `index.md` / `README.md` become folder landing pages.
-- **Clean URLs.** `foo/bar.md` → `/foo/bar/`. Relative `.md` links are rewritten
-  automatically.
-- **GitHub-flavored Markdown.** Tables, task lists, strikethrough, fenced code.
+- **Clean URLs.** `foo/bar.md` → `/foo/bar/`. Relative `.md` links (including
+  `../` traversal, `?query`, and `#fragment`) are rewritten automatically.
+- **GitHub-flavored Markdown.** Tables, task lists, strikethrough, fenced code,
+  autolinked URLs.
 - **Syntax highlighting** via Pygments, generated at build time (no client JS,
   no CDN).
 - **Light / dark mode** with a toggle, persisted in `localStorage`, respecting
@@ -59,6 +71,7 @@ Options:
   -t, --title <string>  Site title (default: from config or folder name)
   --clean               Wipe the output dir before building
   --base <path>         Base URL path for hosting in a subfolder (default: /)
+  --port <n>            Preferred port for `serve` (default: 3000)
   -h, --help            Show help
 ```
 
@@ -66,15 +79,21 @@ Options:
 
 ```bash
 mdsite init my-site                 # scaffold sample content + config
-mdsite serve my-site                # dev server with live-reload
+mdsite serve my-site --port 8080    # dev server with live-reload
 mdsite build ./docs --out ./public --clean
 mdsite build ./docs --base /docs/   # host under a subfolder
 ```
 
+### Viewing the output
+
 Serve the `dist/` folder from any static host, or run `mdsite serve <srcDir>`
 for local preview. Output uses clean, root-relative URLs (`/foo/bar/`), so links
-resolve over HTTP but **not** when opening `dist/index.html` via `file://` — use
-a static server (e.g. `python -m http.server` in `dist/`).
+resolve over HTTP but **not** when opening `dist/index.html` via `file://`. For a
+quick local check without `serve`:
+
+```bash
+cd dist && python -m http.server
+```
 
 ## Front matter
 
@@ -87,6 +106,10 @@ order: 1                 # sort order within its folder (default: alphabetical)
 draft: false             # if true, skip in build
 ---
 ```
+
+Pages without an `order` sort alphabetically by title, after any ordered pages.
+Links pointing at a `draft` page are left untouched (not rewritten), since the
+draft is not emitted.
 
 ## Configuration
 
@@ -102,8 +125,26 @@ Optional `mdsite.config.json` at the source root:
 }
 ```
 
-- `theme`: `"light"`, `"dark"`, or `"auto"`.
-- `exclude`: glob patterns (`**`, `*`, `?`) of source paths to skip.
+- `title` — site title; the `-t/--title` flag overrides it.
+- `description` — used in the page `<meta name="description">`.
+- `theme` — `"light"`, `"dark"`, or `"auto"` (follows the OS preference).
+- `footer` — rendered as raw HTML at the bottom of every page.
+- `exclude` — glob patterns of source paths to skip. Supports `**` (any depth),
+  `*` (within a path segment), and `?` (single character).
+
+## How it works
+
+- **Index pages.** A folder's landing page is its `index.md`. If there is no
+  `index.md`, `README.md` is used instead; if both exist, `README.md` is ignored
+  with a warning.
+- **Clean URLs.** `foo/bar.md` → `dist/foo/bar/index.html`, served at
+  `/foo/bar/`. `index.md`/`README.md` map directly to their folder URL.
+- **Subfolder hosting.** `--base /docs/` prefixes every URL and asset path.
+  The value is normalized, so `docs`, `/docs`, and `/docs/` are equivalent.
+- **`serve` specifics.** The dev server always roots the site at `/` (any
+  `--base` is ignored) and rebuilds with a clean output dir, so deleted or
+  renamed pages never leave stale files behind. Writes into the output dir are
+  ignored by the file watcher, so `mdsite serve .` won't loop.
 
 ## Output
 
@@ -118,10 +159,12 @@ For each `foo/bar.md`, mdsite emits `dist/foo/bar/index.html`, plus:
 ## Development
 
 ```bash
-pip install -e .
-pip install pytest
+pip install -e ".[dev]"
 pytest
 ```
+
+The test suite covers rendering, navigation, config, search, layout, the CLI,
+the init scaffold, and the build/serve pipeline end to end.
 
 ## License
 
