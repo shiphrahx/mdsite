@@ -112,14 +112,30 @@ def _make_handler(root: Path, hub: _ReloadHub):
 class _RebuildHandler(FileSystemEventHandler):
     """Debounced rebuild on any source change."""
 
-    def __init__(self, rebuild, debounce_s: float = 0.15):
+    def __init__(self, rebuild, ignore_under: Path | None = None,
+                 debounce_s: float = 0.15):
         self._rebuild = rebuild
+        self._ignore_under = ignore_under.resolve() if ignore_under else None
         self._debounce = debounce_s
         self._timer: threading.Timer | None = None
         self._lock = threading.Lock()
 
+    def _ignored(self, path: str) -> bool:
+        # Drop events inside the output dir, otherwise each rebuild's writes
+        # retrigger a rebuild — an infinite loop when out is under src (e.g.
+        # `mdsite serve .` with the default ./dist output).
+        if self._ignore_under is None:
+            return False
+        try:
+            p = Path(path).resolve()
+        except (OSError, ValueError):
+            return False
+        return p == self._ignore_under or self._ignore_under in p.parents
+
     def on_any_event(self, event):
         if event.is_directory:
+            return
+        if self._ignored(getattr(event, "src_path", "")):
             return
         with self._lock:
             if self._timer:
@@ -165,7 +181,9 @@ def serve(src_dir: str, opts: dict | None = None) -> None:
         hub.broadcast()
 
     observer = Observer()
-    observer.schedule(_RebuildHandler(rebuild_and_reload), str(src), recursive=True)
+    observer.schedule(
+        _RebuildHandler(rebuild_and_reload, ignore_under=out), str(src), recursive=True
+    )
     observer.start()
 
     url = f"http://127.0.0.1:{port}/"

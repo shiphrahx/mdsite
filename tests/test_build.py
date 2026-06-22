@@ -287,6 +287,39 @@ def test_base_normalized_without_slashes(tmp_path):
     assert "/docsassets/" not in home
 
 
+class _Evt:
+    def __init__(self, path, is_dir=False):
+        self.src_path = path
+        self.is_directory = is_dir
+
+
+def test_rebuild_ignores_output_dir(tmp_path):
+    """Writes under the out dir must not trigger a rebuild (would loop forever
+    when out lives inside src, e.g. `mdsite serve .`)."""
+    from mdsite.serve import _RebuildHandler
+
+    out = (tmp_path / "dist").resolve()
+    out.mkdir()
+    fired = threading.Event()
+    h = _RebuildHandler(lambda: fired.set(), ignore_under=out, debounce_s=0.01)
+
+    # Event inside out/ is ignored.
+    h.on_any_event(_Evt(str(out / "index.html")))
+    assert not fired.wait(0.2), "rebuild fired on output-dir write"
+
+    # Event outside out/ still triggers a rebuild.
+    h.on_any_event(_Evt(str(tmp_path / "page.md")))
+    assert fired.wait(1.0), "rebuild did not fire on source change"
+
+
+def test_rebuild_skips_directory_events(tmp_path):
+    from mdsite.serve import _RebuildHandler
+    fired = threading.Event()
+    h = _RebuildHandler(lambda: fired.set(), debounce_s=0.01)
+    h.on_any_event(_Evt(str(tmp_path / "sub"), is_dir=True))
+    assert not fired.wait(0.2)
+
+
 def test_performance_500_files(tmp_path):
     src = tmp_path / "src"
     _write(src / "index.md", "# Home\n")
