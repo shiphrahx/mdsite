@@ -311,6 +311,20 @@ def test_link_rewrite_preserves_query_and_fragment(tmp_path):
     assert 'href="/page/?v=2#sec"' in body
 
 
+def test_clean_removes_orphan_output(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    _write(src / "page.md", "# Page\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    assert (out / "page" / "index.html").exists()
+    # Remove the source page and rebuild clean — stale output must be gone.
+    # serve forces clean=True for exactly this reason.
+    (src / "page.md").unlink()
+    build(str(src), {"out": str(out), "clean": True})
+    assert not (out / "page" / "index.html").exists()
+
+
 class _Evt:
     def __init__(self, path, is_dir=False):
         self.src_path = path

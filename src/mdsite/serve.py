@@ -153,6 +153,9 @@ def serve(src_dir: str, opts: dict | None = None) -> None:
     if opts.get("base", "/") not in ("/", "", None):
         print(f"note: ignoring --base {opts['base']} in serve (dev server roots at /)")
     opts["base"] = "/"
+    # Wipe output each rebuild so deleted/renamed source pages don't leave
+    # stale orphan HTML behind in the dev server.
+    opts["clean"] = True
     preferred = opts.pop("port", 3000)
     out = Path(opts.get("out", "./dist")).resolve()
     src = Path(src_dir).resolve()
