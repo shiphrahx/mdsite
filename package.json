@@ -1,0 +1,32 @@
+{
+  "name": "mdsite",
+  "version": "0.1.0",
+  "description": "Zero-config CLI that turns a folder of Markdown files into a clean static HTML site.",
+  "type": "module",
+  "bin": {
+    "mdsite": "./src/cli.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "files": [
+    "src",
+    "examples"
+  ],
+  "keywords": [
+    "markdown",
+    "static-site-generator",
+    "ssg",
+    "cli",
+    "offline"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "gray-matter": "^4.0.3",
+    "highlight.js": "^11.10.0",
+    "markdown-it": "^14.1.0"
+  }
+}
