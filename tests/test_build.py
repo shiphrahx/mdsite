@@ -287,6 +287,30 @@ def test_base_normalized_without_slashes(tmp_path):
     assert "/docsassets/" not in home
 
 
+def test_link_to_draft_not_rewritten(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n\n[d](./secret.md)\n")
+    _write(src / "secret.md", "---\ndraft: true\n---\n# Secret\n")
+    out = tmp_path / "out"
+    result = build(str(src), {"out": str(out), "clean": True})
+    assert result["page_count"] == 1
+    body = (out / "index.html").read_text(encoding="utf-8")
+    # Draft is excluded from output, so its link is left as the raw .md href
+    # rather than rewritten to a clean URL that would 404.
+    assert "/secret/" not in body
+    assert "secret.md" in body
+
+
+def test_link_rewrite_preserves_query_and_fragment(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n\n[x](./page.md?v=2#sec)\n")
+    _write(src / "page.md", "# Page\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    body = (out / "index.html").read_text(encoding="utf-8")
+    assert 'href="/page/?v=2#sec"' in body
+
+
 class _Evt:
     def __init__(self, path, is_dir=False):
         self.src_path = path

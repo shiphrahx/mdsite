@@ -61,6 +61,7 @@ def _make_link_rewrite(rel: str, url_map: dict):
         if "://" in href or href.startswith("#") or href.startswith("mailto:"):
             return href
         path_part, _, frag = href.partition("#")
+        path_part, _, query = path_part.partition("?")
         if not path_part.lower().endswith((".md", ".markdown")):
             return href
         target = (from_dir / path_part).as_posix()
@@ -77,6 +78,8 @@ def _make_link_rewrite(rel: str, url_map: dict):
         url = url_map.get(norm)
         if not url:
             return href
+        if query:
+            url = f"{url}?{query}"
         return f"{url}#{frag}" if frag else url
 
     return rewrite
@@ -131,15 +134,10 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
         shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True, exist_ok=True)
 
-    # Pre-compute URL for every md file (for link rewriting).
-    url_map: dict[str, str] = {}
-    for rel in md_files:
-        url_map[rel] = url_for(output_path_for(rel), base)
-
-    # Pass 1: parse + render -> page records.
-    pages: list[Page] = []
-    records: list[dict] = []
-    seen_outputs: dict[str, str] = {}
+    # Pre-pass: read + parse front matter, dropping drafts and undecodable
+    # files. Done before building url_map so links to drafts are NOT rewritten
+    # to clean URLs that will never exist (the draft is excluded from output).
+    parsed: list[dict] = []
     for rel in md_files:
         abs_path = src / rel
         try:
@@ -159,6 +157,20 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
 
         if data.get("draft") is True:
             continue
+
+        parsed.append({"rel": rel, "data": data, "content": content})
+
+    # URL map covers only files that will actually be emitted.
+    url_map: dict[str, str] = {
+        p["rel"]: url_for(output_path_for(p["rel"]), base) for p in parsed
+    }
+
+    # Pass 1: render -> page records.
+    pages: list[Page] = []
+    records: list[dict] = []
+    seen_outputs: dict[str, str] = {}
+    for entry in parsed:
+        rel, data, content = entry["rel"], entry["data"], entry["content"]
 
         rendered = render(content, link_rewrite=_make_link_rewrite(rel, url_map))
         title = data.get("title") or first_h1(rendered.headings) or PurePosixPath(rel).stem
