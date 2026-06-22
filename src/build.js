@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import matter from 'gray-matter';
 import { render, firstH1, slugify } from './render.js';
+import { loadConfig, makeExcludeMatcher } from './config.js';
 
 const MD_EXT = new Set(['.md', '.markdown']);
 
@@ -79,7 +80,11 @@ export async function build(srcDir, opts = {}) {
   }
   if (!stat.isDirectory()) throw new Error(`source is not a directory: ${srcDir}`);
 
-  const all = await walk(src);
+  const config = await loadConfig(src);
+  const isExcluded = makeExcludeMatcher(config.exclude);
+  const siteTitle = opts.title || config.title || path.basename(src);
+
+  const all = (await walk(src)).filter((f) => !isExcluded(f));
   const mdFiles = all.filter((f) => MD_EXT.has(path.extname(f).toLowerCase()));
   const assets = all.filter((f) => !MD_EXT.has(path.extname(f).toLowerCase()));
 
