@@ -71,8 +71,10 @@ mdsite build ./docs --out ./public --clean
 mdsite build ./docs --base /docs/   # host under a subfolder
 ```
 
-Open the generated `dist/index.html` directly in a browser (`file://`) or serve
-the `dist/` folder from any static host.
+Serve the `dist/` folder from any static host, or run `mdsite serve <srcDir>`
+for local preview. Output uses clean, root-relative URLs (`/foo/bar/`), so links
+resolve over HTTP but **not** when opening `dist/index.html` via `file://` — use
+a static server (e.g. `python -m http.server` in `dist/`).
 
 ## Front matter
 
