@@ -3,6 +3,7 @@ import path from 'node:path';
 import matter from 'gray-matter';
 import { render, firstH1, slugify } from './render.js';
 import { loadConfig, makeExcludeMatcher } from './config.js';
+import { buildNav, prevNextMap, isIndexFile } from './nav.js';
 
 const MD_EXT = new Set(['.md', '.markdown']);
 
@@ -97,9 +98,6 @@ export async function build(srcDir, opts = {}) {
   }
   await fs.mkdir(out, { recursive: true });
 
-  const seenOutputs = new Map();
-  let pageCount = 0;
-
   // Pre-compute clean URL for every source .md path, so links between
   // pages can be rewritten. Keys are normalized forward-slash paths.
   const urlMap = new Map();
@@ -124,8 +122,11 @@ export async function build(srcDir, opts = {}) {
     return hash ? `${url}#${hash}` : url;
   };
 
-  // Render markdown pages.
+  // Pass 1: read, parse front matter, render. Collect page records.
+  const pages = [];
+  const seenOutputs = new Map();
   for (const rel of mdFiles) {
+    const norm = rel.split(path.sep).join('/');
     const raw = await fs.readFile(path.join(src, rel), 'utf8');
 
     let data = {};
@@ -149,10 +150,40 @@ export async function build(srcDir, opts = {}) {
     }
     seenOutputs.set(outRel, rel);
 
-    const outAbs = path.join(out, outRel);
+    pages.push({
+      rel: norm,
+      url: urlMap.get(norm),
+      outRel,
+      title,
+      html,
+      headings,
+      order: typeof data.order === 'number' ? data.order : null,
+      isIndex: isIndexFile(rel),
+    });
+  }
+
+  // Build nav tree + prev/next from collected pages.
+  const { tree, ordered } = buildNav(pages);
+  const neighbors = prevNextMap(ordered);
+
+  // Pass 2: write each page with full context (nav + prev/next available).
+  for (const page of pages) {
+    const { prev, next } = neighbors.get(page.url) ?? { prev: null, next: null };
+    const body = pageShell({
+      title: page.title,
+      body: page.html,
+      siteTitle,
+      tree,
+      headings: page.headings,
+      currentUrl: page.url,
+      prev,
+      next,
+      config,
+      base,
+    });
+    const outAbs = path.join(out, page.outRel);
     await fs.mkdir(path.dirname(outAbs), { recursive: true });
-    await fs.writeFile(outAbs, pageShell({ title, body: html }), 'utf8');
-    pageCount++;
+    await fs.writeFile(outAbs, body, 'utf8');
   }
 
   // Copy static assets through verbatim.
@@ -163,7 +194,6 @@ export async function build(srcDir, opts = {}) {
     await fs.copyFile(path.join(src, rel), outAbs);
   }
 
-  console.log(`Built ${pageCount} page(s) → ${path.relative(process.cwd(), out) || out}`);
-  void base; // base wiring lands on Day 2
-  return { pageCount, out };
+  console.log(`Built ${pages.length} page(s) → ${path.relative(process.cwd(), out) || out}`);
+  return { pageCount: pages.length, out };
 }
