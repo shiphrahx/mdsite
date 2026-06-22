@@ -101,6 +101,22 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
     md_files = [f for f in all_files if PurePosixPath(f).suffix.lower() in MD_EXT]
     assets = [f for f in all_files if PurePosixPath(f).suffix.lower() not in MD_EXT]
 
+    # README.md acts as the folder index only when no index.md exists.
+    # Drop README.md siblings of an index.md so they don't collide.
+    dirs_with_index: set[str] = set()
+    for rel in md_files:
+        rp = PurePosixPath(rel)
+        if rp.stem.lower() == "index":
+            dirs_with_index.add(rp.parent.as_posix())
+    kept: list[str] = []
+    for rel in md_files:
+        rp = PurePosixPath(rel)
+        if rp.stem.lower() == "readme" and rp.parent.as_posix() in dirs_with_index:
+            print(f"warn: {rel} ignored — index file present in same folder")
+            continue
+        kept.append(rel)
+    md_files = kept
+
     if not md_files:
         raise RuntimeError(f"no .md files found in {src_dir}")
 

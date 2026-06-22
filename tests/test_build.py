@@ -165,6 +165,32 @@ def test_config_title_and_exclude(tmp_path):
     assert "Cfg" in (out / "index.html").read_text(encoding="utf-8")
 
 
+def test_readme_dropped_when_index_present(tmp_path, capsys):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    _write(src / "guide" / "index.md", "# Guide Index\n")
+    _write(src / "guide" / "README.md", "# Guide Readme\n")
+    out = tmp_path / "out"
+    result = build(str(src), {"out": str(out), "clean": True})
+    assert result["page_count"] == 2
+    body = (out / "guide" / "index.html").read_text(encoding="utf-8")
+    assert "Guide Index" in body
+    assert "Guide Readme" not in body
+    err = capsys.readouterr().out
+    assert "guide/README.md" in err
+
+
+def test_readme_used_as_index_when_alone(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    _write(src / "guide" / "README.md", "# Guide Readme\n")
+    out = tmp_path / "out"
+    result = build(str(src), {"out": str(out), "clean": True})
+    assert result["page_count"] == 2
+    assert (out / "guide" / "index.html").exists()
+    assert "Guide Readme" in (out / "guide" / "index.html").read_text(encoding="utf-8")
+
+
 def test_performance_500_files(tmp_path):
     src = tmp_path / "src"
     _write(src / "index.md", "# Home\n")
