@@ -1,0 +1,190 @@
+"""Walk the source tree, render Markdown, write the static site."""
+
+from __future__ import annotations
+
+import shutil
+from pathlib import Path, PurePosixPath
+
+import frontmatter
+
+from .config import load_config, make_exclude_matcher
+from .nav import Page, build_nav, is_index_file, prev_next_map
+from .render import first_h1, render, slugify
+
+MD_EXT = {".md", ".markdown"}
+
+
+def _walk(root: Path) -> list[str]:
+    """Return source-relative forward-slash paths of all files under root."""
+    out: list[str] = []
+    for p in sorted(root.rglob("*")):
+        if p.is_file():
+            out.append(p.relative_to(root).as_posix())
+    return out
+
+
+def output_path_for(rel: str) -> str:
+    """Map a source .md path to its output html path (forward-slash).
+    foo/bar.md   -> foo/bar/index.html
+    foo/index.md -> foo/index.html
+    index.md     -> index.html
+    """
+    rp = PurePosixPath(rel)
+    base = rp.stem.lower()
+    parent = rp.parent
+    if base in ("index", "readme"):
+        return (parent / "index.html").as_posix()
+    return (parent / slugify(rp.stem) / "index.html").as_posix()
+
+
+def url_for(out_path: str, base: str) -> str:
+    """Convert an output html path to a clean URL ('/foo/bar/')."""
+    url = out_path[: -len("index.html")] if out_path.endswith("index.html") else out_path
+    if not url.startswith("/"):
+        url = "/" + url
+    prefix = base.rstrip("/")
+    joined = (prefix + url) or "/"
+    while "//" in joined:
+        joined = joined.replace("//", "/")
+    return joined or "/"
+
+
+def _page_shell(title: str, body: str) -> str:
+    """Minimal page shell. Replaced by the full template module later."""
+    from html import escape
+    return (
+        "<!doctype html>\n<html lang=\"en\">\n<head>\n"
+        "<meta charset=\"utf-8\">\n"
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
+        f"<title>{escape(title)}</title>\n</head>\n<body>\n<main>\n"
+        f"{body}\n</main>\n</body>\n</html>\n"
+    )
+
+
+def _make_link_rewrite(rel: str, url_map: dict):
+    """Per-file rewriter: resolve a relative .md href to its clean URL."""
+    from_dir = PurePosixPath(rel).parent
+
+    def rewrite(href: str) -> str:
+        if "://" in href or href.startswith("#") or href.startswith("mailto:"):
+            return href
+        path_part, _, frag = href.partition("#")
+        if not path_part.lower().endswith((".md", ".markdown")):
+            return href
+        target = (from_dir / path_part).as_posix()
+        # Normalize ../ and ./ segments.
+        target = PurePosixPath(target)
+        parts: list[str] = []
+        for seg in target.parts:
+            if seg == "..":
+                if parts:
+                    parts.pop()
+            elif seg not in (".", ""):
+                parts.append(seg)
+        norm = "/".join(parts)
+        url = url_map.get(norm)
+        if not url:
+            return href
+        return f"{url}#{frag}" if frag else url
+
+    return rewrite
+
+
+def build(src_dir: str, opts: dict | None = None) -> dict:
+    opts = opts or {}
+    src = Path(src_dir).resolve()
+    out = Path(opts.get("out", "./dist")).resolve()
+    base = opts.get("base", "/")
+
+    if not src.exists():
+        raise RuntimeError(f"source folder not found: {src_dir}")
+    if not src.is_dir():
+        raise RuntimeError(f"source is not a directory: {src_dir}")
+
+    config = load_config(src)
+    is_excluded = make_exclude_matcher(config.get("exclude", []))
+    site_title = opts.get("title") or config.get("title") or src.name
+
+    all_files = [f for f in _walk(src) if not is_excluded(f)]
+    md_files = [f for f in all_files if PurePosixPath(f).suffix.lower() in MD_EXT]
+    assets = [f for f in all_files if PurePosixPath(f).suffix.lower() not in MD_EXT]
+
+    if not md_files:
+        raise RuntimeError(f"no .md files found in {src_dir}")
+
+    if opts.get("clean"):
+        shutil.rmtree(out, ignore_errors=True)
+    out.mkdir(parents=True, exist_ok=True)
+
+    # Pre-compute URL for every md file (for link rewriting).
+    url_map: dict[str, str] = {}
+    for rel in md_files:
+        url_map[rel] = url_for(output_path_for(rel), base)
+
+    # Pass 1: parse + render -> page records.
+    pages: list[Page] = []
+    records: list[dict] = []
+    seen_outputs: dict[str, str] = {}
+    for rel in md_files:
+        abs_path = src / rel
+        try:
+            raw = abs_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            print(f"warn: non-UTF-8 file with .md extension {rel} — skipping")
+            continue
+
+        data: dict = {}
+        content = raw
+        try:
+            post = frontmatter.loads(raw)
+            data = post.metadata
+            content = post.content
+        except Exception as err:  # noqa: BLE001
+            print(f"warn: malformed front matter in {rel} — ignoring ({err})")
+
+        if data.get("draft") is True:
+            continue
+
+        rendered = render(content, link_rewrite=_make_link_rewrite(rel, url_map))
+        title = data.get("title") or first_h1(rendered.headings) or PurePosixPath(rel).stem
+
+        out_rel = output_path_for(rel)
+        if out_rel in seen_outputs:
+            print(f"warn: duplicate output path {out_rel} "
+                  f"(from {seen_outputs[out_rel]} and {rel}) — last wins")
+        seen_outputs[out_rel] = rel
+
+        order = data.get("order")
+        order = order if isinstance(order, int) else None
+
+        pages.append(Page(
+            rel=rel, url=url_map[rel], title=title,
+            order=order, is_index=is_index_file(rel),
+        ))
+        records.append({
+            "out_rel": out_rel, "title": title,
+            "html": rendered.html, "headings": rendered.headings,
+            "url": url_map[rel],
+        })
+
+    tree, ordered = build_nav(pages)
+    neighbors = prev_next_map(ordered)
+
+    # Pass 2: write each page.
+    for rec in records:
+        out_abs = out / rec["out_rel"]
+        out_abs.parent.mkdir(parents=True, exist_ok=True)
+        out_abs.write_text(_page_shell(rec["title"], rec["html"]), encoding="utf-8")
+
+    # Copy static assets verbatim.
+    for rel in assets:
+        if rel == "mdsite.config.json":
+            continue
+        out_abs = out / rel
+        out_abs.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src / rel, out_abs)
+
+    print(f"Built {len(records)} page(s) -> {out}")
+    # tree/neighbors/site_title wired into templates in the next step.
+    _ = (tree, neighbors, site_title, config)
+    return {"page_count": len(records), "out": str(out)}
