@@ -196,6 +196,30 @@ def test_custom_css_missing_file_warns(tmp_path, capsys):
     assert "custom_css" in capsys.readouterr().out
 
 
+def test_last_updated_disabled_by_default(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    assert "page-updated" not in (out / "index.html").read_text(encoding="utf-8")
+
+
+def test_last_updated_mtime_mode(tmp_path):
+    import os
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    os.utime(src / "index.md", (1609588800, 1609588800))  # 2021-01-02 UTC
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"last_updated": "mtime"}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    home = (out / "index.html").read_text(encoding="utf-8")
+    assert 'class="page-updated"' in home
+    assert "2021-01-02" in home
+    assert '<time datetime="2021-01-02">' in home
+
+
 def test_logo_and_favicon(tmp_path):
     src = tmp_path / "src"
     _write(src / "index.md", "# Home\n")

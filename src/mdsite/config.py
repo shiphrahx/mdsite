@@ -15,6 +15,7 @@ DEFAULTS = {
     "custom_css": None,  # path (relative to source) to a CSS file appended to style.css
     "logo": None,        # path (relative to source) to a header logo image
     "favicon": None,     # path (relative to source) to a favicon image
+    "last_updated": None,  # false | "git" | "mtime": show a per-page last-updated date
 }
 
 

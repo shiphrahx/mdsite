@@ -248,6 +248,13 @@ a:hover { text-decoration: underline; }
 .prev-next .pn-dir { font-size: 0.8rem; color: var(--muted); }
 .prev-next .pn-next { text-align: right; }
 
+.page-updated {
+  margin-top: 2em;
+  color: var(--muted);
+  font-size: 0.85rem;
+  max-width: var(--max-content);
+}
+
 .page-footer {
   margin-top: 2.5em;
   padding-top: 1.2em;

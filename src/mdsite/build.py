@@ -9,6 +9,7 @@ from pathlib import Path, PurePosixPath
 import frontmatter
 
 from .config import load_config, make_exclude_matcher
+from .lastmod import last_updated
 from .nav import Page, build_nav, is_index_file, prev_next_map
 from .render import first_h1, render, slugify
 from .layout import (
@@ -205,6 +206,7 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
             order=order, is_index=is_index_file(rel),
         ))
         records.append({
+            "rel": rel,
             "out_rel": out_rel, "title": title,
             "html": rendered.html, "headings": rendered.headings,
             "url": url_map[rel],
@@ -240,9 +242,18 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
             print(f"warn: logo file not found: {logo} — skipping")
     head_extra = "".join(head_extra_parts)
 
+    last_updated_mode = config.get("last_updated")
+
     # Pass 2: assemble + write each page with full template context.
     for rec in records:
         toc_html = render_toc(rec["headings"])
+        updated_html = ""
+        date = last_updated(src, rec["rel"], last_updated_mode)
+        if date:
+            updated_html = (
+                f'<div class="page-updated">Last updated: '
+                f'<time datetime="{date}">{date}</time></div>'
+            )
         nb = neighbors.get(rec["url"], {"prev": None, "next": None})
         prev_next_html = render_prev_next(nb["prev"], nb["next"], base)
         page_html = render_page(
@@ -259,6 +270,7 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
             live_reload=live_reload,
             head_extra=head_extra,
             logo_html=logo_html,
+            updated_html=updated_html,
         )
         out_abs = out / rec["out_rel"]
         out_abs.parent.mkdir(parents=True, exist_ok=True)
