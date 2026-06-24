@@ -13,7 +13,8 @@ from .lastmod import last_updated
 from .nav import Page, build_nav, is_index_file, prev_next_map
 from .render import first_h1, render, slugify
 from .layout import (
-    render_nav, render_page, render_prev_next, render_toc, write_assets,
+    render_meta_tags, render_nav, render_page, render_prev_next, render_toc,
+    write_assets,
 )
 from .search import write_search_index, write_sitemap
 
@@ -219,6 +220,7 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
             "out_rel": out_rel, "title": title,
             "html": rendered.html, "headings": rendered.headings,
             "url": url_map[rel],
+            "meta": data,
         })
 
     tree, ordered = build_nav(pages)
@@ -249,9 +251,20 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
             logo_html = f'<img class="site-logo" src="{escape(url, quote=True)}" alt="">'
         else:
             print(f"warn: logo file not found: {logo} — skipping")
-    head_extra = "".join(head_extra_parts)
+    site_head_extra = "".join(head_extra_parts)
 
     last_updated_mode = config.get("last_updated")
+    social_meta = config.get("social_meta", True)
+    site_url = (config.get("site_url") or "").rstrip("/")
+    default_og_image = config.get("og_image")
+
+    def _abs_url(path: str) -> str:
+        """Absolutize a base-relative path against site_url when configured."""
+        if not path or "://" in path:
+            return path
+        if not path.startswith("/"):
+            path = base + path
+        return site_url + path if site_url else path
 
     # Pass 2: assemble + write each page with full template context.
     for rec in records:
@@ -265,10 +278,27 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
             )
         nb = neighbors.get(rec["url"], {"prev": None, "next": None})
         prev_next_html = render_prev_next(nb["prev"], nb["next"], base)
+
+        # Per-page description (front matter) falls back to the site description.
+        page_desc = rec["meta"].get("description") or description
+        head_extra = site_head_extra
+        if social_meta:
+            image = rec["meta"].get("image") or default_og_image
+            og_html = render_meta_tags(
+                title=rec["title"],
+                description=page_desc,
+                url=_abs_url(rec["url"]),
+                image=_abs_url(image) if image else None,
+                site_title=site_title,
+                og_type="article" if not is_index_file(rec["rel"]) else "website",
+            )
+            if og_html:
+                head_extra = head_extra + "\n" + og_html
+
         page_html = render_page(
             page_title=f'{rec["title"]} · {site_title}' if rec["title"] != site_title else site_title,
             site_title=site_title,
-            description=description,
+            description=page_desc,
             content=rec["html"],
             nav_html=nav_html,
             toc_html=toc_html,
@@ -304,7 +334,7 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
             theme=theme,
             base=base,
             live_reload=live_reload,
-            head_extra=head_extra,
+            head_extra=site_head_extra,
             logo_html=logo_html,
         )
         (out / "404.html").write_text(not_found, encoding="utf-8")

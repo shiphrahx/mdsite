@@ -196,6 +196,60 @@ def test_custom_css_missing_file_warns(tmp_path, capsys):
     assert "custom_css" in capsys.readouterr().out
 
 
+def test_open_graph_tags_with_site_url(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    _write(src / "post.md", "---\ntitle: Post\ndescription: My post\nimage: /img/c.png\n---\n# Post\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"title": "Site", "site_url": "https://example.com/"}),
+        encoding="utf-8",
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    post = (out / "post" / "index.html").read_text(encoding="utf-8")
+    assert '<meta property="og:title" content="Post">' in post
+    assert '<meta property="og:description" content="My post">' in post
+    assert '<meta property="og:url" content="https://example.com/post/">' in post
+    assert '<meta property="og:image" content="https://example.com/img/c.png">' in post
+    # Non-index pages are og:type article.
+    assert '<meta property="og:type" content="article">' in post
+    # Front-matter description also overrides the <meta name=description>.
+    assert '<meta name="description" content="My post">' in post
+
+
+def test_open_graph_index_is_website_type(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    home = (out / "index.html").read_text(encoding="utf-8")
+    assert '<meta property="og:type" content="website">' in home
+
+
+def test_open_graph_can_be_disabled(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"social_meta": False}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    assert "og:title" not in (out / "index.html").read_text(encoding="utf-8")
+
+
+def test_open_graph_default_image_and_no_site_url(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"og_image": "/share.png"}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    home = (out / "index.html").read_text(encoding="utf-8")
+    # Without site_url, og:image stays root-relative.
+    assert '<meta property="og:image" content="/share.png">' in home
+
+
 def test_broken_link_detected(tmp_path, capsys):
     src = tmp_path / "src"
     _write(src / "index.md", "# Home\n\n[gone](./missing.md)\n[ok](./real.md)\n")

@@ -18,6 +18,9 @@ DEFAULTS = {
     "last_updated": None,  # false | "git" | "mtime": show a per-page last-updated date
     "error_page": True,    # emit a 404.html for static hosts
     "check_links": True,   # warn about relative .md links that resolve to nothing
+    "social_meta": True,   # emit Open Graph + Twitter Card meta tags
+    "site_url": None,      # absolute site origin (e.g. https://example.com) for og:url/image
+    "og_image": None,      # default social share image (path or absolute URL)
 }
 
 

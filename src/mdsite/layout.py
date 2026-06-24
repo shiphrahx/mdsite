@@ -107,6 +107,33 @@ def render_page(*, page_title, site_title, description, content, nav_html,
     )
 
 
+def render_meta_tags(*, title, description, url=None, image=None,
+                     site_title=None, og_type="website") -> str:
+    """Open Graph + Twitter Card <meta> tags for social sharing. Only emits a
+    tag when its value is present. Returns a newline-joined string (or '')."""
+    tags: list[str] = []
+
+    def meta(prop_attr, prop, content):
+        if content:
+            tags.append(
+                f'<meta {prop_attr}="{escape(prop, quote=True)}" '
+                f'content="{escape(str(content), quote=True)}">'
+            )
+
+    meta("property", "og:title", title)
+    meta("property", "og:description", description)
+    meta("property", "og:type", og_type)
+    meta("property", "og:url", url)
+    meta("property", "og:image", image)
+    meta("property", "og:site_name", site_title)
+    # Twitter falls back to og:* but card type + image type must be explicit.
+    meta("name", "twitter:card", "summary_large_image" if image else "summary")
+    meta("name", "twitter:title", title)
+    meta("name", "twitter:description", description)
+    meta("name", "twitter:image", image)
+    return "\n".join(tags)
+
+
 def write_assets(out_dir: Path, pygments_style: str = "default",
                  extra_css: str = "") -> None:
     """Copy static template assets + generated highlight CSS into out/assets/.

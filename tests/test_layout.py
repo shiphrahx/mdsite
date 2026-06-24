@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from mdsite.layout import (
+    render_meta_tags,
     render_nav,
     render_page,
     render_prev_next,
@@ -182,6 +183,38 @@ def test_render_page_slots_default_empty():
     # Unfilled slots leave no literal placeholder braces behind.
     assert "{head_extra}" not in html
     assert "{logo_html}" not in html
+
+
+# ---- render_meta_tags ----
+
+def test_meta_tags_full():
+    html = render_meta_tags(
+        title="My Page", description="A page", url="https://x.com/p/",
+        image="https://x.com/cover.png", site_title="Site",
+    )
+    assert '<meta property="og:title" content="My Page">' in html
+    assert '<meta property="og:url" content="https://x.com/p/">' in html
+    assert '<meta property="og:image" content="https://x.com/cover.png">' in html
+    assert '<meta property="og:site_name" content="Site">' in html
+    # With an image, the Twitter card upgrades to large image.
+    assert '<meta name="twitter:card" content="summary_large_image">' in html
+
+
+def test_meta_tags_omit_empty():
+    html = render_meta_tags(title="T", description="", url=None, image=None,
+                            site_title=None)
+    assert "og:title" in html
+    assert "og:description" not in html
+    assert "og:url" not in html
+    assert "og:image" not in html
+    # No image -> plain summary card.
+    assert '<meta name="twitter:card" content="summary">' in html
+
+
+def test_meta_tags_escape_quotes():
+    html = render_meta_tags(title='He said "hi"', description="", site_title=None)
+    assert '"hi"' not in html  # raw quotes must be escaped inside the attribute
+    assert "&quot;hi&quot;" in html
 
 
 # ---- write_assets ----
