@@ -18,6 +18,9 @@ from .layout import (
     write_assets, write_vendor_asset, write_vendor_tree,
 )
 from .search import write_search_index, write_sitemap
+from .versions import (
+    default_version, normalize_versions, redirect_html, render_version_switcher,
+)
 from .tags import (
     collect_tags, normalize_tags, render_tag_chips, render_tag_index_content,
     render_tag_page_content,
@@ -114,6 +117,48 @@ def _make_link_rewrite(rel: str, url_map: dict, broken: list | None = None):
     return rewrite
 
 
+def _build_versioned(src: Path, out: Path, base: str, opts: dict,
+                     config: dict, live_reload: str) -> dict:
+    """Build each documentation version into out/<slug>/ and write a root
+    redirect to the default version. Every version shares the top-level config
+    (minus `versions`) and shows a header switcher."""
+    versions = normalize_versions(config["versions"])
+
+    if opts.get("clean"):
+        shutil.rmtree(out, ignore_errors=True)
+    out.mkdir(parents=True, exist_ok=True)
+
+    shared = {k: v for k, v in config.items() if k != "versions"}
+    total = 0
+    for v in versions:
+        sub_src = src / v["dir"]
+        slug = v["slug"]
+        switcher = render_version_switcher(versions, slug, base)
+        sub_opts = {
+            **opts,
+            "out": str(out / slug),
+            "base": f"{base}{slug}/",
+            "clean": False,            # whole out already cleaned above
+            "_config": shared,
+            "header_extra": switcher,
+        }
+        result = build(str(sub_src), sub_opts, live_reload)
+        total += result["page_count"]
+
+    # Root bounces to the default version.
+    default = default_version(versions)
+    (out / "index.html").write_text(
+        redirect_html(f"{base}{default['slug']}/"), encoding="utf-8"
+    )
+    print(f"Built {len(versions)} version(s), {total} page(s) -> {out}")
+    return {
+        "page_count": total,
+        "out": str(out),
+        "versions": [v["slug"] for v in versions],
+        "default_version": default["slug"],
+    }
+
+
 def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict:
     opts = opts or {}
     src = Path(src_dir).resolve()
@@ -132,11 +177,20 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
     if not src.is_dir():
         raise RuntimeError(f"source is not a directory: {src_dir}")
 
-    config = load_config(src)
+    # In a versioned build the orchestrator passes the parent config down via
+    # "_config" so every version shares the top-level settings.
+    config = opts.get("_config") or load_config(src)
+
+    # Versioned docs: build each version subtree, unless we're already inside a
+    # per-version build (signalled by "_config").
+    if config.get("versions") and "_config" not in opts:
+        return _build_versioned(src, out, base, opts, config, live_reload)
+
     is_excluded = make_exclude_matcher(config.get("exclude", []))
     site_title = opts.get("title") or config.get("title") or src.name
     diagrams = bool(config.get("diagrams", False))
     math = bool(config.get("math", False))
+    header_extra = opts.get("header_extra", "")
 
     all_files = [f for f in _walk(src) if not is_excluded(f)]
     md_files = [f for f in all_files if PurePosixPath(f).suffix.lower() in MD_EXT]
@@ -360,6 +414,7 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
             updated_html=updated_html,
             tags_html=tags_html,
             body_extra=body_extra,
+            header_extra=header_extra,
         )
         out_abs = out / rec["out_rel"]
         out_abs.parent.mkdir(parents=True, exist_ok=True)
@@ -377,7 +432,7 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
                 prev_next_html=render_prev_next(None, None, base),
                 footer=footer, theme=theme, base=base, live_reload=live_reload,
                 head_extra=site_head_extra, logo_html=logo_html,
-                body_extra=body_extra,
+                body_extra=body_extra, header_extra=header_extra,
             )
             dest = out / out_rel
             dest.parent.mkdir(parents=True, exist_ok=True)
@@ -415,6 +470,7 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
             head_extra=site_head_extra,
             logo_html=logo_html,
             body_extra=body_extra,
+            header_extra=header_extra,
         )
         (out / "404.html").write_text(not_found, encoding="utf-8")
 

@@ -72,6 +72,18 @@ a:hover { text-decoration: underline; }
 .nav-toggle:hover, .theme-toggle:hover { background: var(--code-bg); }
 .nav-toggle { display: none; }
 
+/* Version switcher */
+.version-switcher select {
+  font-family: var(--font);
+  font-size: 0.85rem;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
 /* Search */
 .search { position: relative; margin-left: auto; }
 #search-input {

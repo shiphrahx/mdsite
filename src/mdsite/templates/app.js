@@ -63,6 +63,15 @@
     }
   });
 
+  // ---- Version switcher ----
+  (function () {
+    var sel = document.querySelector('.version-switcher select');
+    if (!sel) return;
+    sel.addEventListener('change', function () {
+      if (sel.value) window.location.href = sel.value;
+    });
+  })();
+
   // ---- Code block copy buttons ----
   (function () {
     var blocks = document.querySelectorAll('.markdown-body pre');

@@ -235,6 +235,58 @@ def test_diagrams_respect_base(tmp_path):
     assert 'src="/docs/assets/vendor/mermaid.min.js"' in home
 
 
+def test_versioned_build(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "v1" / "index.md", "# V1 Home\n")
+    _write(src / "v1" / "page.md", "# V1 Page\n")
+    _write(src / "v2" / "index.md", "# V2 Home\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({
+            "title": "Docs",
+            "versions": [
+                {"label": "v1", "dir": "v1"},
+                {"label": "v2", "dir": "v2", "default": True},
+            ],
+        }),
+        encoding="utf-8",
+    )
+    out = tmp_path / "out"
+    result = build(str(src), {"out": str(out), "clean": True})
+    assert result["versions"] == ["v1", "v2"]
+    assert result["default_version"] == "v2"
+    assert result["page_count"] == 3
+    # Each version built under its own subdir.
+    assert (out / "v1" / "index.html").exists()
+    assert (out / "v1" / "page" / "index.html").exists()
+    assert (out / "v2" / "index.html").exists()
+    # Root redirects to the default version.
+    root = (out / "index.html").read_text(encoding="utf-8")
+    assert "http-equiv=\"refresh\"" in root
+    assert "/v2/" in root
+    # Version pages carry the switcher with version-scoped URLs + shared title.
+    v1 = (out / "v1" / "index.html").read_text(encoding="utf-8")
+    assert "version-switcher" in v1
+    assert 'value="/v2/"' in v1
+    assert "Docs" in v1
+    # Per-version asset/nav URLs are scoped to the version base.
+    assert "/v1/assets/style.css" in v1
+    assert 'href="/v1/page/"' in v1
+
+
+def test_versioned_build_respects_base(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "v1" / "index.md", "# V1\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"versions": ["v1"]}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True, "base": "/docs/"})
+    v1 = (out / "v1" / "index.html").read_text(encoding="utf-8")
+    assert "/docs/v1/assets/style.css" in v1
+    root = (out / "index.html").read_text(encoding="utf-8")
+    assert "/docs/v1/" in root
+
+
 def test_math_disabled_by_default(tmp_path):
     src = tmp_path / "src"
     _write(src / "index.md", "# Home\n\nEuler: $e^{i\\pi}+1=0$\n")
