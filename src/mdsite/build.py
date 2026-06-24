@@ -12,7 +12,7 @@ from .config import load_config, make_exclude_matcher
 from .feed import collect_feed_entries, write_feed
 from .lastmod import last_updated
 from .nav import Page, build_nav, is_index_file, prev_next_map
-from .render import first_h1, render, slugify
+from .render import first_h1, normalize_extensions, render, slugify
 from .layout import (
     render_meta_tags, render_nav, render_page, render_prev_next, render_toc,
     write_assets, write_vendor_asset, write_vendor_tree,
@@ -190,6 +190,7 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
     site_title = opts.get("title") or config.get("title") or src.name
     diagrams = bool(config.get("diagrams", False))
     math = bool(config.get("math", False))
+    extensions = normalize_extensions(config.get("markdown"))
     header_extra = opts.get("header_extra", "")
 
     all_files = [f for f in _walk(src) if not is_excluded(f)]
@@ -260,7 +261,7 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
 
         rendered = render(
             content, link_rewrite=_make_link_rewrite(rel, url_map, broken_links),
-            diagrams=diagrams, math=math,
+            diagrams=diagrams, math=math, extensions=extensions,
         )
         title = data.get("title") or first_h1(rendered.headings) or PurePosixPath(rel).stem
 

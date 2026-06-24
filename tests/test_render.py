@@ -7,6 +7,7 @@ import pytest
 from mdsite.render import (
     Heading,
     first_h1,
+    normalize_extensions,
     pygments_css,
     render,
     slugify,
@@ -194,6 +195,46 @@ def test_math_untouched_when_disabled():
     out = render(r"cost is $5 and $10", math=False)
     # No math parsing: dollar signs stay literal, no math spans.
     assert 'class="math' not in out.html
+
+
+# ---- markdown extensions ----
+
+def test_normalize_extensions_dict():
+    ext = normalize_extensions({"footnote": True, "deflist": False, "typographer": True})
+    assert ext == frozenset({"footnote", "typographer"})
+
+
+def test_normalize_extensions_list_and_unknown(capsys):
+    ext = normalize_extensions(["deflist", "bogus"])
+    assert ext == frozenset({"deflist"})
+    assert "unknown markdown extension" in capsys.readouterr().out
+
+
+def test_normalize_extensions_empty():
+    assert normalize_extensions(None) == frozenset()
+    assert normalize_extensions({}) == frozenset()
+
+
+def test_footnote_extension():
+    md = "Text with a note[^1]\n\n[^1]: the note\n"
+    assert "footnote" not in render(md).html  # off by default
+    out = render(md, extensions=frozenset({"footnote"}))
+    assert "footnote" in out.html
+
+
+def test_deflist_extension():
+    md = "Term\n:   Definition\n"
+    assert "<dl>" not in render(md).html
+    assert "<dl>" in render(md, extensions=frozenset({"deflist"})).html
+
+
+def test_typographer_extension():
+    md = '"quote" and a dash --- and dots...'
+    plain = render(md).html
+    assert "---" in plain  # untouched without typographer
+    fancy = render(md, extensions=frozenset({"typographer"})).html
+    assert "—" in fancy or "–" in fancy
+    assert "“" in fancy
 
 
 # ---- first_h1 ----

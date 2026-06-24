@@ -26,6 +26,7 @@ DEFAULTS = {
     "diagrams": False,     # render ```mermaid code blocks via vendored mermaid.js
     "math": False,         # render $…$/$$…$$ via vendored KaTeX
     "versions": None,      # list of doc versions (subdirs) for versioned builds
+    "markdown": None,      # optional markdown-it features: footnote, deflist, typographer
 }
 
 

@@ -235,6 +235,28 @@ def test_diagrams_respect_base(tmp_path):
     assert 'src="/docs/assets/vendor/mermaid.min.js"' in home
 
 
+def test_markdown_extensions_config(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n\nNote[^1]\n\nTerm\n:   Def\n\n[^1]: footnote body\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"markdown": {"footnote": True, "deflist": True}}),
+        encoding="utf-8",
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    home = (out / "index.html").read_text(encoding="utf-8")
+    assert "footnote" in home
+    assert "<dl>" in home
+
+
+def test_markdown_extensions_off_by_default(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n\nTerm\n:   Def\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    assert "<dl>" not in (out / "index.html").read_text(encoding="utf-8")
+
+
 def test_versioned_build(tmp_path):
     src = tmp_path / "src"
     _write(src / "v1" / "index.md", "# V1 Home\n")

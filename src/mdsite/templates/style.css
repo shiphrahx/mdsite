@@ -248,6 +248,15 @@ a:hover { text-decoration: underline; }
 .markdown-body ul.contains-task-list { list-style: none; padding-left: 0; }
 .markdown-body .task-list-item input { margin-right: 0.5em; }
 .markdown-body hr { border: none; border-top: 1px solid var(--border); margin: 2em 0; }
+/* Definition lists (deflist extension) */
+.markdown-body dl { margin: 1em 0; }
+.markdown-body dt { font-weight: 600; }
+.markdown-body dd { margin: 0 0 0.6em 1.5em; color: var(--fg); }
+/* Footnotes (footnote extension) */
+.markdown-body .footnotes { font-size: 0.88rem; color: var(--muted); }
+.markdown-body .footnotes-sep { margin-top: 2.5em; }
+.markdown-body .footnote-ref a { text-decoration: none; }
+.markdown-body .footnote-backref { text-decoration: none; }
 
 /* Prev / next */
 .prev-next {
