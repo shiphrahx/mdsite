@@ -155,6 +155,28 @@ def test_pygments_css_non_empty():
     assert len(css) > 50
 
 
+# ---- mermaid diagrams ----
+
+def test_mermaid_block_when_diagrams_enabled():
+    out = render("```mermaid\ngraph TD; A-->B;\n```\n", diagrams=True)
+    assert '<pre class="mermaid">' in out.html
+    assert "graph TD; A--&gt;B;" in out.html  # source preserved + escaped
+    assert "hljs" not in out.html  # not syntax-highlighted
+
+
+def test_mermaid_block_highlighted_when_diagrams_disabled():
+    out = render("```mermaid\ngraph TD; A-->B;\n```\n", diagrams=False)
+    # Falls back to a normal (highlighted) code block, not a mermaid container.
+    assert 'class="mermaid"' not in out.html
+    assert "<pre" in out.html
+
+
+def test_non_mermaid_code_unaffected_by_diagrams_flag():
+    out = render("```python\nprint('hi')\n```\n", diagrams=True)
+    assert "hljs" in out.html
+    assert 'class="mermaid"' not in out.html
+
+
 # ---- first_h1 ----
 
 def test_first_h1_returns_first_level1():

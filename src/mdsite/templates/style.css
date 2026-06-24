@@ -195,6 +195,14 @@ a:hover { text-decoration: underline; }
   border: 1px solid var(--border);
 }
 .markdown-body pre.has-copy { position: relative; }
+/* Mermaid diagrams: let the rendered SVG sit on the page background, not the
+   code-block chrome. */
+.markdown-body pre.mermaid {
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: center;
+}
 .copy-btn {
   position: absolute;
   top: 8px;

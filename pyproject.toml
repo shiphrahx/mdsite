@@ -29,4 +29,4 @@ mdsite = "mdsite.cli:_entry"
 where = ["src"]
 
 [tool.setuptools.package-data]
-mdsite = ["templates/*"]
+mdsite = ["templates/*", "templates/vendor/*"]

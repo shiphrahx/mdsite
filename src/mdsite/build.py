@@ -15,7 +15,7 @@ from .nav import Page, build_nav, is_index_file, prev_next_map
 from .render import first_h1, render, slugify
 from .layout import (
     render_meta_tags, render_nav, render_page, render_prev_next, render_toc,
-    write_assets,
+    write_assets, write_vendor_asset,
 )
 from .search import write_search_index, write_sitemap
 from .tags import (
@@ -135,6 +135,7 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
     config = load_config(src)
     is_excluded = make_exclude_matcher(config.get("exclude", []))
     site_title = opts.get("title") or config.get("title") or src.name
+    diagrams = bool(config.get("diagrams", False))
 
     all_files = [f for f in _walk(src) if not is_excluded(f)]
     md_files = [f for f in all_files if PurePosixPath(f).suffix.lower() in MD_EXT]
@@ -203,7 +204,8 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
         rel, data, content = entry["rel"], entry["data"], entry["content"]
 
         rendered = render(
-            content, link_rewrite=_make_link_rewrite(rel, url_map, broken_links)
+            content, link_rewrite=_make_link_rewrite(rel, url_map, broken_links),
+            diagrams=diagrams,
         )
         title = data.get("title") or first_h1(rendered.headings) or PurePosixPath(rel).stem
 
@@ -267,6 +269,19 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
         )
     site_head_extra = "".join(head_extra_parts)
 
+    # Optional client libraries loaded at body end (vendored locally, offline).
+    body_extra_parts: list[str] = []
+    if diagrams:
+        mer = write_vendor_asset(out, "mermaid.min.js")
+        body_extra_parts.append(
+            f'<script src="{escape(base + mer, quote=True)}"></script>\n'
+            '<script>(function(){if(!window.mermaid)return;'
+            "var dark=document.documentElement.getAttribute('data-theme')==='dark';"
+            "mermaid.initialize({startOnLoad:true,theme:dark?'dark':'default'});})();"
+            "</script>"
+        )
+    body_extra = "\n".join(body_extra_parts)
+
     last_updated_mode = config.get("last_updated")
     social_meta = config.get("social_meta", True)
     site_url = (config.get("site_url") or "").rstrip("/")
@@ -327,6 +342,7 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
             logo_html=logo_html,
             updated_html=updated_html,
             tags_html=tags_html,
+            body_extra=body_extra,
         )
         out_abs = out / rec["out_rel"]
         out_abs.parent.mkdir(parents=True, exist_ok=True)
@@ -344,6 +360,7 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
                 prev_next_html=render_prev_next(None, None, base),
                 footer=footer, theme=theme, base=base, live_reload=live_reload,
                 head_extra=site_head_extra, logo_html=logo_html,
+                body_extra=body_extra,
             )
             dest = out / out_rel
             dest.parent.mkdir(parents=True, exist_ok=True)
@@ -380,6 +397,7 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
             live_reload=live_reload,
             head_extra=site_head_extra,
             logo_html=logo_html,
+            body_extra=body_extra,
         )
         (out / "404.html").write_text(not_found, encoding="utf-8")
 

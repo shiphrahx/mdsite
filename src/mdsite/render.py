@@ -50,17 +50,37 @@ def pygments_css(style: str = "default") -> str:
     return HtmlFormatter(style=style, cssclass="hljs").get_style_defs(".hljs")
 
 
-def _make_md() -> MarkdownIt:
+def _make_highlight(diagrams: bool):
+    """Highlight callback. With diagrams on, ```mermaid fences are emitted as
+    <pre class="mermaid"> (rendered client-side) instead of syntax-highlighted."""
+    def highlight(code: str, lang: str, attrs) -> str:
+        if diagrams and lang == "mermaid":
+            return f'<pre class="mermaid">{escape(code)}</pre>'
+        return _highlight_code(code, lang, attrs)
+    return highlight
+
+
+def _make_md(diagrams: bool = False) -> MarkdownIt:
     md = (
         MarkdownIt("commonmark", {"html": True, "linkify": True, "typographer": False})
         .enable(["table", "strikethrough", "linkify"])
         .use(tasklists_plugin, enabled=True)
     )
-    md.options["highlight"] = _highlight_code
+    md.options["highlight"] = _make_highlight(diagrams)
     return md
 
 
-_MD = _make_md()
+# Cache one MarkdownIt instance per feature combination (setup is not free).
+_MD_CACHE: dict[tuple, MarkdownIt] = {}
+
+
+def _get_md(diagrams: bool = False) -> MarkdownIt:
+    key = (bool(diagrams),)
+    md = _MD_CACHE.get(key)
+    if md is None:
+        md = _make_md(diagrams=diagrams)
+        _MD_CACHE[key] = md
+    return md
 
 
 @dataclass
@@ -76,12 +96,15 @@ class Rendered:
     headings: list[Heading]
 
 
-def render(markdown: str, link_rewrite: Optional[Callable[[str], str]] = None) -> Rendered:
+def render(markdown: str, link_rewrite: Optional[Callable[[str], str]] = None,
+           diagrams: bool = False) -> Rendered:
     """Render markdown to HTML. Injects heading ids + hover anchors, rewrites
     relative .md links via link_rewrite, hardens external links, lazy-loads
-    images. Returns Rendered(html, headings)."""
+    images. With diagrams=True, ```mermaid blocks become client-rendered
+    diagrams. Returns Rendered(html, headings)."""
+    md = _get_md(diagrams)
     env: dict = {}
-    tokens = _MD.parse(markdown, env)
+    tokens = md.parse(markdown, env)
     headings: list[Heading] = []
     used_slugs: set[str] = set()
 
@@ -106,7 +129,7 @@ def render(markdown: str, link_rewrite: Optional[Callable[[str], str]] = None) -
             headings.append(Heading(level=level, text=text, slug=slug))
             # Append a hover anchor link inside the heading's inline children.
             if inline is not None:
-                anchor = _MD.parseInline(
+                anchor = md.parseInline(
                     f' <a class="anchor" href="#{slug}" aria-label="Permalink">#</a>',
                     {},
                 )
@@ -131,7 +154,7 @@ def render(markdown: str, link_rewrite: Optional[Callable[[str], str]] = None) -
 
         i += 1
 
-    html = _MD.renderer.render(tokens, _MD.options, env)
+    html = md.renderer.render(tokens, md.options, env)
     return Rendered(html=html, headings=headings)
 
 

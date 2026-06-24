@@ -197,6 +197,44 @@ def test_custom_css_missing_file_warns(tmp_path, capsys):
     assert "custom_css" in capsys.readouterr().out
 
 
+def test_diagrams_disabled_by_default(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n\n```mermaid\ngraph TD; A-->B;\n```\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    assert not (out / "assets" / "vendor" / "mermaid.min.js").exists()
+    assert 'class="mermaid"' not in (out / "index.html").read_text(encoding="utf-8")
+
+
+def test_diagrams_enabled(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n\n```mermaid\ngraph TD; A-->B;\n```\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"diagrams": True}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    # Library vendored locally (offline).
+    mer = out / "assets" / "vendor" / "mermaid.min.js"
+    assert mer.exists() and mer.stat().st_size > 1000
+    home = (out / "index.html").read_text(encoding="utf-8")
+    assert '<pre class="mermaid">' in home
+    assert "assets/vendor/mermaid.min.js" in home
+    assert "mermaid.initialize" in home
+
+
+def test_diagrams_respect_base(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n\n```mermaid\ngraph TD;A-->B;\n```\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"diagrams": True}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True, "base": "/docs/"})
+    home = (out / "index.html").read_text(encoding="utf-8")
+    assert 'src="/docs/assets/vendor/mermaid.min.js"' in home
+
+
 def test_feed_generated_from_dated_pages(tmp_path):
     src = tmp_path / "src"
     _write(src / "index.md", "# Home\n")

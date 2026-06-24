@@ -88,7 +88,8 @@ def render_prev_next(prev, nxt, base: str) -> str:
 
 def render_page(*, page_title, site_title, description, content, nav_html,
                 toc_html, prev_next_html, footer, theme, base, live_reload="",
-                head_extra="", logo_html="", updated_html="", tags_html="") -> str:
+                head_extra="", logo_html="", updated_html="", tags_html="",
+                body_extra="") -> str:
     return _PAGE.format(
         page_title=escape(page_title),
         site_title=escape(site_title),
@@ -105,7 +106,18 @@ def render_page(*, page_title, site_title, description, content, nav_html,
         logo_html=logo_html or "",
         updated_html=updated_html or "",
         tags_html=tags_html or "",
+        body_extra=body_extra or "",
     )
+
+
+def write_vendor_asset(out_dir: Path, name: str) -> str:
+    """Copy a bundled third-party asset (templates/vendor/<name>) into
+    out/assets/vendor/. Returns the output-relative path under assets/."""
+    data = resources.files("mdsite").joinpath("templates", "vendor", name).read_bytes()
+    dest = out_dir / "assets" / "vendor"
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / name).write_bytes(data)
+    return f"assets/vendor/{name}"
 
 
 def render_meta_tags(*, title, description, url=None, image=None,
