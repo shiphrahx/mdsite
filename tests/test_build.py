@@ -197,6 +197,57 @@ def test_custom_css_missing_file_warns(tmp_path, capsys):
     assert "custom_css" in capsys.readouterr().out
 
 
+def test_feed_generated_from_dated_pages(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    _write(src / "new.md", "---\ntitle: New\ndate: 2024-03-02\n---\n# New\n")
+    _write(src / "old.md", "---\ntitle: Old\ndate: 2020-01-01\n---\n# Old\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"title": "Blog", "site_url": "https://ex.com"}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    feed = out / "feed.xml"
+    assert feed.exists()
+    xml = feed.read_text(encoding="utf-8")
+    # Newest entry first.
+    assert xml.index("New") < xml.index("Old")
+    assert '<link href="https://ex.com/new/"/>' in xml
+    # Discovery link present in dated + undated pages' <head>.
+    home = (out / "index.html").read_text(encoding="utf-8")
+    assert 'type="application/atom+xml"' in home
+    assert 'href="/feed.xml"' in home
+
+
+def test_no_feed_without_dates(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    assert not (out / "feed.xml").exists()
+    assert "application/atom+xml" not in (out / "index.html").read_text(encoding="utf-8")
+
+
+def test_feed_can_be_disabled(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "---\ndate: 2024-01-01\n---\n# Home\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"feed": False}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    assert not (out / "feed.xml").exists()
+
+
+def test_feed_respects_base(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "---\ndate: 2024-01-01\n---\n# Home\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True, "base": "/docs/"})
+    home = (out / "index.html").read_text(encoding="utf-8")
+    assert 'href="/docs/feed.xml"' in home
+
+
 def test_tags_chips_and_pages(tmp_path):
     src = tmp_path / "src"
     _write(src / "index.md", "# Home\n")

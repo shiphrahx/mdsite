@@ -9,6 +9,7 @@ from pathlib import Path, PurePosixPath
 import frontmatter
 
 from .config import load_config, make_exclude_matcher
+from .feed import collect_feed_entries, write_feed
 from .lastmod import last_updated
 from .nav import Page, build_nav, is_index_file, prev_next_map
 from .render import first_h1, render, slugify
@@ -255,6 +256,15 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
             logo_html = f'<img class="site-logo" src="{escape(url, quote=True)}" alt="">'
         else:
             print(f"warn: logo file not found: {logo} — skipping")
+    # Atom feed: built from pages carrying a front-matter `date`.
+    feed_entries = collect_feed_entries(records) if config.get("feed", True) else []
+    if feed_entries:
+        feed_url = f"{base}feed.xml"
+        head_extra_parts.append(
+            f'<link rel="alternate" type="application/atom+xml" '
+            f'title="{escape(site_title, quote=True)}" '
+            f'href="{escape(feed_url, quote=True)}">'
+        )
     site_head_extra = "".join(head_extra_parts)
 
     last_updated_mode = config.get("last_updated")
@@ -395,6 +405,8 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
     write_assets(out, extra_css=extra_css)
     write_search_index(out, records)
     write_sitemap(out, [r["url"] for r in records] + tag_urls, base)
+    if feed_entries:
+        write_feed(out, site_title, description, site_url, base, feed_entries)
 
     if config.get("check_links", True) and broken_links:
         print(f"warn: {len(broken_links)} broken internal link(s):")
