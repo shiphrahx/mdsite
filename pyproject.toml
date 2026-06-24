@@ -29,4 +29,9 @@ mdsite = "mdsite.cli:_entry"
 where = ["src"]
 
 [tool.setuptools.package-data]
-mdsite = ["templates/*", "templates/vendor/*"]
+mdsite = [
+    "templates/*",
+    "templates/vendor/*",
+    "templates/vendor/katex/*",
+    "templates/vendor/katex/fonts/*",
+]

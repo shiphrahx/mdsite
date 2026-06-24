@@ -24,6 +24,7 @@ DEFAULTS = {
     "tag_pages": True,     # generate /tags/ and /tags/<slug>/ listing pages
     "feed": True,          # generate an Atom feed.xml from pages with a `date`
     "diagrams": False,     # render ```mermaid code blocks via vendored mermaid.js
+    "math": False,         # render $…$/$$…$$ via vendored KaTeX
 }
 
 

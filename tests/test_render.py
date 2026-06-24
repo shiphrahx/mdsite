@@ -177,6 +177,25 @@ def test_non_mermaid_code_unaffected_by_diagrams_flag():
     assert 'class="mermaid"' not in out.html
 
 
+# ---- math (KaTeX) ----
+
+def test_inline_math_when_enabled():
+    out = render(r"Euler: $e^{i\pi}+1=0$ done", math=True)
+    assert '<span class="math inline">' in out.html
+    assert r"e^{i\pi}+1=0" in out.html
+
+
+def test_block_math_when_enabled():
+    out = render("$$\n\\int_0^1 x\\,dx\n$$\n", math=True)
+    assert '<div class="math block">' in out.html
+
+
+def test_math_untouched_when_disabled():
+    out = render(r"cost is $5 and $10", math=False)
+    # No math parsing: dollar signs stay literal, no math spans.
+    assert 'class="math' not in out.html
+
+
 # ---- first_h1 ----
 
 def test_first_h1_returns_first_level1():

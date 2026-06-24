@@ -235,6 +235,49 @@ def test_diagrams_respect_base(tmp_path):
     assert 'src="/docs/assets/vendor/mermaid.min.js"' in home
 
 
+def test_math_disabled_by_default(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n\nEuler: $e^{i\\pi}+1=0$\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    assert not (out / "assets" / "vendor" / "katex").exists()
+    assert 'class="math' not in (out / "index.html").read_text(encoding="utf-8")
+
+
+def test_math_enabled(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n\nEuler: $e^{i\\pi}+1=0$\n\n$$\n\\int_0^1 x\\,dx\n$$\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"math": True}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    # KaTeX vendored locally with fonts (offline).
+    katex_js = out / "assets" / "vendor" / "katex" / "katex.min.js"
+    assert katex_js.exists()
+    assert (out / "assets" / "vendor" / "katex" / "katex.min.css").exists()
+    fonts = list((out / "assets" / "vendor" / "katex" / "fonts").glob("*.woff2"))
+    assert len(fonts) >= 10
+    home = (out / "index.html").read_text(encoding="utf-8")
+    assert '<span class="math inline">' in home
+    assert '<div class="math block">' in home
+    assert "katex.min.css" in home  # in <head>
+    assert "katex.render" in home   # init script
+
+
+def test_math_respects_base(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n\n$x$\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"math": True}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True, "base": "/docs/"})
+    home = (out / "index.html").read_text(encoding="utf-8")
+    assert "/docs/assets/vendor/katex/katex.min.css" in home
+    assert "/docs/assets/vendor/katex/katex.min.js" in home
+
+
 def test_feed_generated_from_dated_pages(tmp_path):
     src = tmp_path / "src"
     _write(src / "index.md", "# Home\n")

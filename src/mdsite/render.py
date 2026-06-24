@@ -9,6 +9,7 @@ from html import escape
 from typing import Callable, Optional
 
 from markdown_it import MarkdownIt
+from mdit_py_plugins.dollarmath import dollarmath_plugin
 from mdit_py_plugins.tasklists import tasklists_plugin
 from pygments import highlight as pyg_highlight
 from pygments.formatters import HtmlFormatter
@@ -60,12 +61,17 @@ def _make_highlight(diagrams: bool):
     return highlight
 
 
-def _make_md(diagrams: bool = False) -> MarkdownIt:
+def _make_md(diagrams: bool = False, math: bool = False) -> MarkdownIt:
     md = (
         MarkdownIt("commonmark", {"html": True, "linkify": True, "typographer": False})
         .enable(["table", "strikethrough", "linkify"])
         .use(tasklists_plugin, enabled=True)
     )
+    if math:
+        # Protects $…$ / $$…$$ spans from markdown mangling; emits
+        # <span class="math inline"> / <div class="math block"> with raw LaTeX,
+        # rendered client-side by KaTeX.
+        md.use(dollarmath_plugin)
     md.options["highlight"] = _make_highlight(diagrams)
     return md
 
@@ -74,11 +80,11 @@ def _make_md(diagrams: bool = False) -> MarkdownIt:
 _MD_CACHE: dict[tuple, MarkdownIt] = {}
 
 
-def _get_md(diagrams: bool = False) -> MarkdownIt:
-    key = (bool(diagrams),)
+def _get_md(diagrams: bool = False, math: bool = False) -> MarkdownIt:
+    key = (bool(diagrams), bool(math))
     md = _MD_CACHE.get(key)
     if md is None:
-        md = _make_md(diagrams=diagrams)
+        md = _make_md(diagrams=diagrams, math=math)
         _MD_CACHE[key] = md
     return md
 
@@ -97,12 +103,13 @@ class Rendered:
 
 
 def render(markdown: str, link_rewrite: Optional[Callable[[str], str]] = None,
-           diagrams: bool = False) -> Rendered:
+           diagrams: bool = False, math: bool = False) -> Rendered:
     """Render markdown to HTML. Injects heading ids + hover anchors, rewrites
     relative .md links via link_rewrite, hardens external links, lazy-loads
     images. With diagrams=True, ```mermaid blocks become client-rendered
-    diagrams. Returns Rendered(html, headings)."""
-    md = _get_md(diagrams)
+    diagrams; with math=True, $…$/$$…$$ become KaTeX-rendered math. Returns
+    Rendered(html, headings)."""
+    md = _get_md(diagrams, math)
     env: dict = {}
     tokens = md.parse(markdown, env)
     headings: list[Heading] = []

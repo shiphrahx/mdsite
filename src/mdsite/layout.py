@@ -120,6 +120,24 @@ def write_vendor_asset(out_dir: Path, name: str) -> str:
     return f"assets/vendor/{name}"
 
 
+def _copy_traversable(trav, dest: Path) -> None:
+    if trav.is_dir():
+        dest.mkdir(parents=True, exist_ok=True)
+        for child in trav.iterdir():
+            _copy_traversable(child, dest / child.name)
+    else:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(trav.read_bytes())
+
+
+def write_vendor_tree(out_dir: Path, subdir: str) -> str:
+    """Recursively copy a bundled vendor directory (templates/vendor/<subdir>)
+    into out/assets/vendor/<subdir>. Returns the output-relative root path."""
+    root = resources.files("mdsite").joinpath("templates", "vendor", subdir)
+    _copy_traversable(root, out_dir / "assets" / "vendor" / subdir)
+    return f"assets/vendor/{subdir}"
+
+
 def render_meta_tags(*, title, description, url=None, image=None,
                      site_title=None, og_type="website") -> str:
     """Open Graph + Twitter Card <meta> tags for social sharing. Only emits a

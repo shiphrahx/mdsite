@@ -15,7 +15,7 @@ from .nav import Page, build_nav, is_index_file, prev_next_map
 from .render import first_h1, render, slugify
 from .layout import (
     render_meta_tags, render_nav, render_page, render_prev_next, render_toc,
-    write_assets, write_vendor_asset,
+    write_assets, write_vendor_asset, write_vendor_tree,
 )
 from .search import write_search_index, write_sitemap
 from .tags import (
@@ -136,6 +136,7 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
     is_excluded = make_exclude_matcher(config.get("exclude", []))
     site_title = opts.get("title") or config.get("title") or src.name
     diagrams = bool(config.get("diagrams", False))
+    math = bool(config.get("math", False))
 
     all_files = [f for f in _walk(src) if not is_excluded(f)]
     md_files = [f for f in all_files if PurePosixPath(f).suffix.lower() in MD_EXT]
@@ -205,7 +206,7 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
 
         rendered = render(
             content, link_rewrite=_make_link_rewrite(rel, url_map, broken_links),
-            diagrams=diagrams,
+            diagrams=diagrams, math=math,
         )
         title = data.get("title") or first_h1(rendered.headings) or PurePosixPath(rel).stem
 
@@ -267,7 +268,6 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
             f'title="{escape(site_title, quote=True)}" '
             f'href="{escape(feed_url, quote=True)}">'
         )
-    site_head_extra = "".join(head_extra_parts)
 
     # Optional client libraries loaded at body end (vendored locally, offline).
     body_extra_parts: list[str] = []
@@ -280,7 +280,24 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
             "mermaid.initialize({startOnLoad:true,theme:dark?'dark':'default'});})();"
             "</script>"
         )
+    if math:
+        katex_root = write_vendor_tree(out, "katex")
+        # Stylesheet must load in <head>; fonts resolve relative to the CSS.
+        head_extra_parts.append(
+            f'<link rel="stylesheet" '
+            f'href="{escape(base + katex_root + "/katex.min.css", quote=True)}">'
+        )
+        body_extra_parts.append(
+            f'<script src="{escape(base + katex_root + "/katex.min.js", quote=True)}"></script>\n'
+            '<script>(function(){if(!window.katex)return;'
+            'function r(sel,disp){document.querySelectorAll(sel).forEach(function(el){'
+            'try{katex.render(el.textContent,el,{throwOnError:false,displayMode:disp});}'
+            'catch(e){}});}'
+            "r('.math.inline',false);r('.math.block',true);})();</script>"
+        )
     body_extra = "\n".join(body_extra_parts)
+    # head_extra_parts may have grown (KaTeX CSS) after the feed block built it.
+    site_head_extra = "".join(head_extra_parts)
 
     last_updated_mode = config.get("last_updated")
     social_meta = config.get("social_meta", True)
