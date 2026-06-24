@@ -17,6 +17,7 @@ DEFAULTS = {
     "favicon": None,     # path (relative to source) to a favicon image
     "last_updated": None,  # false | "git" | "mtime": show a per-page last-updated date
     "error_page": True,    # emit a 404.html for static hosts
+    "check_links": True,   # warn about relative .md links that resolve to nothing
 }
 
 

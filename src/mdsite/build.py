@@ -70,8 +70,12 @@ def url_for(out_path: str, base: str) -> str:
     return joined or "/"
 
 
-def _make_link_rewrite(rel: str, url_map: dict):
-    """Per-file rewriter: resolve a relative .md href to its clean URL."""
+def _make_link_rewrite(rel: str, url_map: dict, broken: list | None = None):
+    """Per-file rewriter: resolve a relative .md href to its clean URL.
+
+    A relative .md/.markdown target that is not in url_map (a typo, or a link
+    to an excluded/draft page that will 404) is recorded in `broken` as
+    (source_rel, original_href) when a collector list is supplied."""
     from_dir = PurePosixPath(rel).parent
 
     def rewrite(href: str) -> str:
@@ -94,6 +98,8 @@ def _make_link_rewrite(rel: str, url_map: dict):
         norm = "/".join(parts)
         url = url_map.get(norm)
         if not url:
+            if broken is not None:
+                broken.append((rel, href))
             return href
         if query:
             url = f"{url}?{query}"
@@ -186,10 +192,13 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
     pages: list[Page] = []
     records: list[dict] = []
     seen_outputs: dict[str, str] = {}
+    broken_links: list[tuple[str, str]] = []
     for entry in parsed:
         rel, data, content = entry["rel"], entry["data"], entry["content"]
 
-        rendered = render(content, link_rewrite=_make_link_rewrite(rel, url_map))
+        rendered = render(
+            content, link_rewrite=_make_link_rewrite(rel, url_map, broken_links)
+        )
         title = data.get("title") or first_h1(rendered.headings) or PurePosixPath(rel).stem
 
         out_rel = output_path_for(rel)
@@ -323,5 +332,14 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
     write_search_index(out, records)
     write_sitemap(out, [r["url"] for r in records], base)
 
+    if config.get("check_links", True) and broken_links:
+        print(f"warn: {len(broken_links)} broken internal link(s):")
+        for source_rel, href in broken_links:
+            print(f"  {source_rel} -> {href}")
+
     print(f"Built {len(records)} page(s) -> {out}")
-    return {"page_count": len(records), "out": str(out)}
+    return {
+        "page_count": len(records),
+        "out": str(out),
+        "broken_links": broken_links,
+    }

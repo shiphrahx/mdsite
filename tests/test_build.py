@@ -196,6 +196,53 @@ def test_custom_css_missing_file_warns(tmp_path, capsys):
     assert "custom_css" in capsys.readouterr().out
 
 
+def test_broken_link_detected(tmp_path, capsys):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n\n[gone](./missing.md)\n[ok](./real.md)\n")
+    _write(src / "real.md", "# Real\n")
+    out = tmp_path / "out"
+    result = build(str(src), {"out": str(out), "clean": True})
+    assert ("index.md", "./missing.md") in result["broken_links"]
+    # The valid link is not reported.
+    assert all(href != "./real.md" for _, href in result["broken_links"])
+    out_text = capsys.readouterr().out
+    assert "broken internal link" in out_text
+    assert "./missing.md" in out_text
+
+
+def test_broken_link_includes_draft_target(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n\n[d](./secret.md)\n")
+    _write(src / "secret.md", "---\ndraft: true\n---\n# Secret\n")
+    out = tmp_path / "out"
+    result = build(str(src), {"out": str(out), "clean": True})
+    # Links to dropped drafts will 404, so they are reported as broken.
+    assert ("index.md", "./secret.md") in result["broken_links"]
+
+
+def test_no_broken_links_clean(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n\n[ok](./page.md)\n[ext](https://x.com/a.md)\n")
+    _write(src / "page.md", "# Page\n")
+    out = tmp_path / "out"
+    result = build(str(src), {"out": str(out), "clean": True})
+    # External .md URLs are never treated as internal links.
+    assert result["broken_links"] == []
+
+
+def test_check_links_can_be_disabled(tmp_path, capsys):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n\n[gone](./missing.md)\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"check_links": False}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    result = build(str(src), {"out": str(out), "clean": True})
+    # Still collected (for tooling), but not printed as a warning.
+    assert result["broken_links"]
+    assert "broken internal link" not in capsys.readouterr().out
+
+
 def test_404_page_generated(tmp_path):
     src = tmp_path / "src"
     _write(src / "index.md", "# Home\n")
