@@ -16,6 +16,7 @@ DEFAULTS = {
     "logo": None,        # path (relative to source) to a header logo image
     "favicon": None,     # path (relative to source) to a favicon image
     "last_updated": None,  # false | "git" | "mtime": show a per-page last-updated date
+    "error_page": True,    # emit a 404.html for static hosts
 }
 
 

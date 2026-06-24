@@ -196,6 +196,42 @@ def test_custom_css_missing_file_warns(tmp_path, capsys):
     assert "custom_css" in capsys.readouterr().out
 
 
+def test_404_page_generated(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    _write(src / "page.md", "# Page\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    nf = out / "404.html"
+    assert nf.exists()
+    body = nf.read_text(encoding="utf-8")
+    assert "Page not found" in body
+    # Carries the nav + a home link, and is a full styled page.
+    assert "assets/style.css" in body
+    assert 'href="/page/"' in body  # nav rendered
+
+
+def test_404_page_respects_base(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True, "base": "/docs/"})
+    body = (out / "404.html").read_text(encoding="utf-8")
+    assert "/docs/assets/style.css" in body
+    assert 'href="/docs/"' in body  # home link
+
+
+def test_404_page_can_be_disabled(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"error_page": False}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    assert not (out / "404.html").exists()
+
+
 def test_last_updated_disabled_by_default(tmp_path):
     src = tmp_path / "src"
     _write(src / "index.md", "# Home\n")

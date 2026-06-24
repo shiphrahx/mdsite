@@ -276,6 +276,30 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
         out_abs.parent.mkdir(parents=True, exist_ok=True)
         out_abs.write_text(page_html, encoding="utf-8")
 
+    # 404 page: most static hosts serve /404.html automatically on a miss.
+    # Asset/nav links carry the base prefix like every other page.
+    if config.get("error_page", True):
+        not_found = render_page(
+            page_title=f"404 · {site_title}",
+            site_title=site_title,
+            description=description,
+            content=(
+                '<h1>Page not found</h1>\n'
+                '<p>The page you’re looking for doesn’t exist or may have moved.</p>\n'
+                f'<p><a href="{base}">← Back to home</a></p>'
+            ),
+            nav_html=nav_html,
+            toc_html="",
+            prev_next_html=render_prev_next(None, None, base),
+            footer=footer,
+            theme=theme,
+            base=base,
+            live_reload=live_reload,
+            head_extra=head_extra,
+            logo_html=logo_html,
+        )
+        (out / "404.html").write_text(not_found, encoding="utf-8")
+
     # Copy static assets verbatim.
     for rel in assets:
         if rel == "mdsite.config.json":
