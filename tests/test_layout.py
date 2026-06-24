@@ -246,6 +246,15 @@ def test_write_assets_bundles_copy_button(tmp_path):
     assert ".copy-btn" in style
 
 
+def test_write_assets_search_js_has_highlight_and_headings(tmp_path):
+    write_assets(tmp_path)
+    searchjs = (tmp_path / "assets" / "search.js").read_text(encoding="utf-8")
+    # Heading-aware ranking + match highlighting ship in search.js.
+    assert "item.headings" in searchjs
+    assert "<mark>" in searchjs
+    assert "function highlight" in searchjs
+
+
 def test_write_assets_appends_custom_css_last(tmp_path):
     write_assets(tmp_path, extra_css=".brand { color: hotpink; }")
     style = (tmp_path / "assets" / "style.css").read_text(encoding="utf-8")

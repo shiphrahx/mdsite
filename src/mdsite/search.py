@@ -20,13 +20,24 @@ def html_to_text(html: str) -> str:
 
 
 def write_search_index(out_dir: Path, records: list[dict], max_chars: int = 2000) -> None:
-    """Emit a flat [{title, url, text}] index for client-side search."""
+    """Emit a flat [{title, url, text, headings}] index for client-side search.
+
+    `headings` carries the page's H2/H3 heading texts so the client can rank
+    heading matches above plain body matches."""
     index = []
     for rec in records:
         text = html_to_text(rec["html"])
         if len(text) > max_chars:
             text = text[:max_chars]
-        index.append({"title": rec["title"], "url": rec["url"], "text": text})
+        headings = [
+            h.text for h in rec.get("headings", []) if getattr(h, "level", 1) in (2, 3)
+        ]
+        index.append({
+            "title": rec["title"],
+            "url": rec["url"],
+            "text": text,
+            "headings": headings,
+        })
     (out_dir / "search-index.json").write_text(
         json.dumps(index, ensure_ascii=False), encoding="utf-8"
     )

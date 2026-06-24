@@ -109,6 +109,7 @@ a:hover { text-decoration: underline; }
 .search-results .r-title { font-weight: 600; }
 .search-results .r-snippet { font-size: 0.85rem; color: var(--muted); }
 .search-results .r-empty { padding: 12px; color: var(--muted); }
+.search-results mark { background: rgba(255, 212, 0, 0.4); color: inherit; padding: 0 1px; border-radius: 2px; }
 
 /* Layout */
 .layout {

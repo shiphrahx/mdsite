@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from mdsite.render import Heading
 from mdsite.search import html_to_text, write_search_index, write_sitemap
 
 
@@ -36,8 +37,24 @@ def test_index_shape(tmp_path):
     write_search_index(tmp_path, records)
     data = json.loads((tmp_path / "search-index.json").read_text(encoding="utf-8"))
     assert [r["url"] for r in data] == ["/", "/p/"]
-    assert all(set(r) == {"title", "url", "text"} for r in data)
+    assert all(set(r) == {"title", "url", "text", "headings"} for r in data)
     assert data[0]["text"] == "Hello world"
+
+
+def test_index_includes_h2_h3_headings(tmp_path):
+    records = [{
+        "title": "Page", "url": "/p/", "html": "<p>body</p>",
+        "headings": [
+            Heading(1, "Title", "title"),
+            Heading(2, "Install", "install"),
+            Heading(3, "Steps", "steps"),
+            Heading(4, "Detail", "detail"),
+        ],
+    }]
+    write_search_index(tmp_path, records)
+    data = json.loads((tmp_path / "search-index.json").read_text(encoding="utf-8"))
+    # Only H2/H3 are indexed for ranking; H1 (page title) and H4+ excluded.
+    assert data[0]["headings"] == ["Install", "Steps"]
 
 
 def test_index_truncated_to_max_chars(tmp_path):

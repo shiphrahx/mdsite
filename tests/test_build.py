@@ -450,7 +450,7 @@ def test_search_index_shape(tmp_path):
     idx = json.loads((out / "search-index.json").read_text(encoding="utf-8"))
     assert isinstance(idx, list)
     rec = idx[0]
-    assert set(rec) == {"title", "url", "text"}
+    assert set(rec) == {"title", "url", "text", "headings"}
     # Body is tag-stripped plain text.
     assert "<" not in rec["text"]
     assert "Hello world with a code span" in rec["text"]
