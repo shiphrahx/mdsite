@@ -103,12 +103,18 @@ def render_page(*, page_title, site_title, description, content, nav_html,
     )
 
 
-def write_assets(out_dir: Path, pygments_style: str = "default") -> None:
-    """Copy static template assets + generated highlight CSS into out/assets/."""
+def write_assets(out_dir: Path, pygments_style: str = "default",
+                 extra_css: str = "") -> None:
+    """Copy static template assets + generated highlight CSS into out/assets/.
+
+    extra_css (e.g. a user's custom.css) is appended last so its rules win over
+    the bundled defaults — letting users rebrand without forking templates."""
     assets = out_dir / "assets"
     assets.mkdir(parents=True, exist_ok=True)
     # Append Pygments CSS to style.css so it ships as one file.
     style = _load("style.css") + "\n\n/* Syntax highlighting (Pygments) */\n" + pygments_css(pygments_style)
+    if extra_css:
+        style += "\n\n/* Custom CSS (user override) */\n" + extra_css
     (assets / "style.css").write_text(style, encoding="utf-8")
     (assets / "app.js").write_text(_load("app.js"), encoding="utf-8")
     (assets / "search.js").write_text(_load("search.js"), encoding="utf-8")

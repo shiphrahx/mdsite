@@ -166,3 +166,17 @@ def test_write_assets_bundles_pygments_css(tmp_path):
     style = (tmp_path / "assets" / "style.css").read_text(encoding="utf-8")
     assert "Pygments" in style
     assert ".hljs" in style
+
+
+def test_write_assets_appends_custom_css_last(tmp_path):
+    write_assets(tmp_path, extra_css=".brand { color: hotpink; }")
+    style = (tmp_path / "assets" / "style.css").read_text(encoding="utf-8")
+    assert ".brand { color: hotpink; }" in style
+    # Custom CSS must come AFTER the bundled defaults so its rules win.
+    assert style.index(".brand") > style.index("Pygments")
+
+
+def test_write_assets_no_custom_css_marker_when_empty(tmp_path):
+    write_assets(tmp_path)
+    style = (tmp_path / "assets" / "style.css").read_text(encoding="utf-8")
+    assert "Custom CSS" not in style

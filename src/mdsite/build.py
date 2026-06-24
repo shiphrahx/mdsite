@@ -235,8 +235,18 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
         out_abs.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src / rel, out_abs)
 
+    # Optional user CSS, appended to the bundled stylesheet (its rules win).
+    extra_css = ""
+    custom_css = config.get("custom_css")
+    if custom_css:
+        css_path = src / custom_css
+        try:
+            extra_css = css_path.read_text(encoding="utf-8")
+        except OSError:
+            print(f"warn: custom_css file not found: {custom_css} — skipping")
+
     # Bundled CSS/JS assets + search index + sitemap.
-    write_assets(out)
+    write_assets(out, extra_css=extra_css)
     write_search_index(out, records)
     write_sitemap(out, [r["url"] for r in records], base)
 

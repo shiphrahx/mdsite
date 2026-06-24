@@ -168,6 +168,34 @@ def test_config_title_and_exclude(tmp_path):
     assert "Cfg" in (out / "index.html").read_text(encoding="utf-8")
 
 
+def test_custom_css_appended(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    _write(src / "brand.css", ".markdown-body { font-family: Comic Sans; }")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"custom_css": "brand.css"}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    style = (out / "assets" / "style.css").read_text(encoding="utf-8")
+    assert "Comic Sans" in style
+    # The CSS source file itself is not also copied as a standalone asset page.
+    assert not (out / "brand" / "index.html").exists()
+
+
+def test_custom_css_missing_file_warns(tmp_path, capsys):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"custom_css": "nope.css"}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    # Missing custom_css must warn but not abort the build.
+    result = build(str(src), {"out": str(out), "clean": True})
+    assert result["page_count"] == 1
+    assert "custom_css" in capsys.readouterr().out
+
+
 def test_readme_dropped_when_index_present(tmp_path, capsys):
     src = tmp_path / "src"
     _write(src / "index.md", "# Home\n")
