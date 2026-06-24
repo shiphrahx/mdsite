@@ -56,8 +56,9 @@ a:hover { text-decoration: underline; }
   background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
-.site-title { font-weight: 600; font-size: 1.1rem; color: var(--fg); }
+.site-title { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 1.1rem; color: var(--fg); }
 .site-title:hover { text-decoration: none; }
+.site-logo { height: 28px; width: auto; display: block; }
 .nav-toggle, .theme-toggle {
   background: none;
   border: 1px solid transparent;

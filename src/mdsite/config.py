@@ -13,6 +13,8 @@ DEFAULTS = {
     "footer": "",
     "exclude": [],
     "custom_css": None,  # path (relative to source) to a CSS file appended to style.css
+    "logo": None,        # path (relative to source) to a header logo image
+    "favicon": None,     # path (relative to source) to a favicon image
 }
 
 

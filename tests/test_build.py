@@ -196,6 +196,51 @@ def test_custom_css_missing_file_warns(tmp_path, capsys):
     assert "custom_css" in capsys.readouterr().out
 
 
+def test_logo_and_favicon(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    (src / "logo.svg").write_bytes(b"<svg/>")
+    (src / "fav.ico").write_bytes(b"ICO")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"logo": "logo.svg", "favicon": "fav.ico"}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    # Files copied into assets/ under their basename.
+    assert (out / "assets" / "logo.svg").read_bytes() == b"<svg/>"
+    assert (out / "assets" / "fav.ico").read_bytes() == b"ICO"
+    home = (out / "index.html").read_text(encoding="utf-8")
+    assert '<link rel="icon" href="/assets/fav.ico">' in home
+    assert '<img class="site-logo" src="/assets/logo.svg"' in home
+
+
+def test_logo_favicon_respect_base(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    (src / "logo.svg").write_bytes(b"<svg/>")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"logo": "logo.svg"}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True, "base": "/docs/"})
+    home = (out / "index.html").read_text(encoding="utf-8")
+    assert 'src="/docs/assets/logo.svg"' in home
+
+
+def test_missing_logo_warns(tmp_path, capsys):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"logo": "nope.png", "favicon": "nope.ico"}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    result = build(str(src), {"out": str(out), "clean": True})
+    assert result["page_count"] == 1
+    err = capsys.readouterr().out
+    assert "logo file not found" in err
+    assert "favicon file not found" in err
+
+
 def test_readme_dropped_when_index_present(tmp_path, capsys):
     src = tmp_path / "src"
     _write(src / "index.md", "# Home\n")

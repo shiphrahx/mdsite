@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+from html import escape
 from pathlib import Path, PurePosixPath
 
 import frontmatter
@@ -25,6 +26,21 @@ def _walk(root: Path) -> list[str]:
         if p.is_file():
             out.append(p.relative_to(root).as_posix())
     return out
+
+
+def copy_to_assets(src: Path, out: Path, rel: str, base: str) -> str | None:
+    """Copy a source-relative file into out/assets/, returning its base-relative
+    URL (e.g. '/assets/logo.svg'), or None if the source file is missing."""
+    source = src / rel
+    name = PurePosixPath(rel).name
+    try:
+        data = source.read_bytes()
+    except OSError:
+        return None
+    assets = out / "assets"
+    assets.mkdir(parents=True, exist_ok=True)
+    (assets / name).write_bytes(data)
+    return f"{base}assets/{name}"
 
 
 def output_path_for(rel: str) -> str:
@@ -205,6 +221,25 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
     # side), so render it once instead of per page.
     nav_html = render_nav(tree, base)
 
+    # Site-wide head/header extras (favicon + logo), identical on every page.
+    head_extra_parts: list[str] = []
+    favicon = config.get("favicon")
+    if favicon:
+        url = copy_to_assets(src, out, favicon, base)
+        if url:
+            head_extra_parts.append(f'<link rel="icon" href="{escape(url, quote=True)}">')
+        else:
+            print(f"warn: favicon file not found: {favicon} — skipping")
+    logo_html = ""
+    logo = config.get("logo")
+    if logo:
+        url = copy_to_assets(src, out, logo, base)
+        if url:
+            logo_html = f'<img class="site-logo" src="{escape(url, quote=True)}" alt="">'
+        else:
+            print(f"warn: logo file not found: {logo} — skipping")
+    head_extra = "".join(head_extra_parts)
+
     # Pass 2: assemble + write each page with full template context.
     for rec in records:
         toc_html = render_toc(rec["headings"])
@@ -222,6 +257,8 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
             theme=theme,
             base=base,
             live_reload=live_reload,
+            head_extra=head_extra,
+            logo_html=logo_html,
         )
         out_abs = out / rec["out_rel"]
         out_abs.parent.mkdir(parents=True, exist_ok=True)

@@ -151,6 +151,39 @@ def test_render_page_escapes_title():
     assert "&lt;evil&gt;" in html
 
 
+def test_render_page_head_extra_and_logo():
+    html = render_page(
+        page_title="P",
+        site_title="Site",
+        description="",
+        content="",
+        nav_html="",
+        toc_html="",
+        prev_next_html="",
+        footer="",
+        theme="auto",
+        base="/",
+        head_extra='<link rel="icon" href="/assets/f.ico">',
+        logo_html='<img class="site-logo" src="/assets/l.svg" alt="">',
+    )
+    assert '<link rel="icon" href="/assets/f.ico">' in html
+    # head_extra lands inside <head>, before </head>.
+    assert html.index('rel="icon"') < html.index("</head>")
+    # logo sits inside the site-title link, before the title text.
+    assert html.index("site-logo") < html.index(">Site</a>")
+
+
+def test_render_page_slots_default_empty():
+    html = render_page(
+        page_title="P", site_title="S", description="", content="",
+        nav_html="", toc_html="", prev_next_html="", footer="",
+        theme="auto", base="/",
+    )
+    # Unfilled slots leave no literal placeholder braces behind.
+    assert "{head_extra}" not in html
+    assert "{logo_html}" not in html
+
+
 # ---- write_assets ----
 
 def test_write_assets_creates_files(tmp_path):
