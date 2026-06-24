@@ -12,6 +12,22 @@ DEFAULTS = {
     "theme": "auto",  # "light" | "dark" | "auto"
     "footer": "",
     "exclude": [],
+    "custom_css": None,  # path (relative to source) to a CSS file appended to style.css
+    "logo": None,        # path (relative to source) to a header logo image
+    "favicon": None,     # path (relative to source) to a favicon image
+    "last_updated": None,  # false | "git" | "mtime": show a per-page last-updated date
+    "error_page": True,    # emit a 404.html for static hosts
+    "check_links": True,   # warn about relative .md links that resolve to nothing
+    "social_meta": True,   # emit Open Graph + Twitter Card meta tags
+    "site_url": None,      # absolute site origin (e.g. https://example.com) for og:url/image
+    "og_image": None,      # default social share image (path or absolute URL)
+    "tag_pages": True,     # generate /tags/ and /tags/<slug>/ listing pages
+    "feed": True,          # generate an Atom feed.xml from pages with a `date`
+    "diagrams": False,     # render ```mermaid code blocks via vendored mermaid.js
+    "math": False,         # render $…$/$$…$$ via vendored KaTeX
+    "versions": None,      # list of doc versions (subdirs) for versioned builds
+    "markdown": None,      # optional markdown-it features: footnote, deflist, typographer
+    "incremental": False,  # cache rendered pages, re-rendering only changed ones
 }
 
 

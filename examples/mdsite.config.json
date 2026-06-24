@@ -3,5 +3,7 @@
   "description": "A sample site built with mdsite",
   "theme": "auto",
   "footer": "© 2026 mdsite",
-  "exclude": ["drafts/**", "*.tmp.md"]
+  "exclude": ["drafts/**", "*.tmp.md"],
+  "last_updated": "git",
+  "markdown": { "footnote": true, "typographer": true }
 }

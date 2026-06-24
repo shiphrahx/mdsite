@@ -29,6 +29,11 @@
     var ti = t.indexOf(q);
     if (ti === 0) return 100;
     if (ti > 0) return 70 - ti;
+    // Heading matches rank above plain body matches.
+    var headings = item.headings || [];
+    for (var h = 0; h < headings.length; h++) {
+      if (headings[h].toLowerCase().indexOf(q) >= 0) return 55;
+    }
     var bi = body.indexOf(q);
     if (bi >= 0) return 40 - Math.min(bi, 30) / 30 * 10;
     // light fuzzy: all chars in order
@@ -52,6 +57,21 @@
     });
   }
 
+  // Escape, then wrap each (case-insensitive) occurrence of the query in <mark>.
+  function highlight(text, q) {
+    var lower = text.toLowerCase();
+    var out = '';
+    var from = 0;
+    var i;
+    while (q && (i = lower.indexOf(q, from)) >= 0) {
+      out += escapeHtml(text.slice(from, i));
+      out += '<mark>' + escapeHtml(text.slice(i, i + q.length)) + '</mark>';
+      from = i + q.length;
+    }
+    out += escapeHtml(text.slice(from));
+    return out;
+  }
+
   function render(q) {
     if (!q) { box.hidden = true; box.innerHTML = ''; return; }
     if (!index) { box.hidden = false; box.innerHTML = '<div class="r-empty">Loading…</div>'; return; }
@@ -70,8 +90,8 @@
     }
     box.innerHTML = results.map(function (it, i) {
       return '<a href="' + it.url + '" data-i="' + i + '">' +
-        '<span class="r-title">' + escapeHtml(it.title) + '</span>' +
-        '<span class="r-snippet">' + escapeHtml(snippet(it.text, q)) + '</span></a>';
+        '<span class="r-title">' + highlight(it.title, q) + '</span>' +
+        '<span class="r-snippet">' + highlight(snippet(it.text, q), q) + '</span></a>';
     }).join('');
     box.hidden = false;
   }

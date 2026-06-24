@@ -9,7 +9,35 @@ from html import escape
 from typing import Callable, Optional
 
 from markdown_it import MarkdownIt
+from mdit_py_plugins.deflist import deflist_plugin
+from mdit_py_plugins.dollarmath import dollarmath_plugin
+from mdit_py_plugins.footnote import footnote_plugin
 from mdit_py_plugins.tasklists import tasklists_plugin
+
+# Optional markdown-it features the user can opt into via the `markdown` config.
+KNOWN_EXTENSIONS = frozenset({"footnote", "deflist", "typographer"})
+
+
+def normalize_extensions(value) -> frozenset:
+    """Coerce a `markdown` config value into a frozenset of enabled extension
+    names. Accepts a dict ({name: bool}) or a list of names. Unknown names are
+    ignored with a warning."""
+    if not value:
+        return frozenset()
+    if isinstance(value, dict):
+        names = [k for k, v in value.items() if v]
+    elif isinstance(value, (list, tuple)):
+        names = list(value)
+    else:
+        return frozenset()
+    enabled = set()
+    for name in names:
+        n = str(name).strip().lower()
+        if n in KNOWN_EXTENSIONS:
+            enabled.add(n)
+        else:
+            print(f"warn: unknown markdown extension '{name}' — ignoring")
+    return frozenset(enabled)
 from pygments import highlight as pyg_highlight
 from pygments.formatters import HtmlFormatter
 from pygments.lexers import get_lexer_by_name, guess_lexer
@@ -50,17 +78,52 @@ def pygments_css(style: str = "default") -> str:
     return HtmlFormatter(style=style, cssclass="hljs").get_style_defs(".hljs")
 
 
-def _make_md() -> MarkdownIt:
+def _make_highlight(diagrams: bool):
+    """Highlight callback. With diagrams on, ```mermaid fences are emitted as
+    <pre class="mermaid"> (rendered client-side) instead of syntax-highlighted."""
+    def highlight(code: str, lang: str, attrs) -> str:
+        if diagrams and lang == "mermaid":
+            return f'<pre class="mermaid">{escape(code)}</pre>'
+        return _highlight_code(code, lang, attrs)
+    return highlight
+
+
+def _make_md(diagrams: bool = False, math: bool = False,
+             extensions: frozenset = frozenset()) -> MarkdownIt:
+    typographer = "typographer" in extensions
     md = (
-        MarkdownIt("commonmark", {"html": True, "linkify": True, "typographer": False})
+        MarkdownIt("commonmark",
+                   {"html": True, "linkify": True, "typographer": typographer})
         .enable(["table", "strikethrough", "linkify"])
         .use(tasklists_plugin, enabled=True)
     )
-    md.options["highlight"] = _highlight_code
+    if typographer:
+        md.enable(["replacements", "smartquotes"])
+    if "footnote" in extensions:
+        md.use(footnote_plugin)
+    if "deflist" in extensions:
+        md.use(deflist_plugin)
+    if math:
+        # Protects $…$ / $$…$$ spans from markdown mangling; emits
+        # <span class="math inline"> / <div class="math block"> with raw LaTeX,
+        # rendered client-side by KaTeX.
+        md.use(dollarmath_plugin)
+    md.options["highlight"] = _make_highlight(diagrams)
     return md
 
 
-_MD = _make_md()
+# Cache one MarkdownIt instance per feature combination (setup is not free).
+_MD_CACHE: dict[tuple, MarkdownIt] = {}
+
+
+def _get_md(diagrams: bool = False, math: bool = False,
+            extensions: frozenset = frozenset()) -> MarkdownIt:
+    key = (bool(diagrams), bool(math), frozenset(extensions))
+    md = _MD_CACHE.get(key)
+    if md is None:
+        md = _make_md(diagrams=diagrams, math=math, extensions=extensions)
+        _MD_CACHE[key] = md
+    return md
 
 
 @dataclass
@@ -76,12 +139,18 @@ class Rendered:
     headings: list[Heading]
 
 
-def render(markdown: str, link_rewrite: Optional[Callable[[str], str]] = None) -> Rendered:
+def render(markdown: str, link_rewrite: Optional[Callable[[str], str]] = None,
+           diagrams: bool = False, math: bool = False,
+           extensions: frozenset = frozenset()) -> Rendered:
     """Render markdown to HTML. Injects heading ids + hover anchors, rewrites
     relative .md links via link_rewrite, hardens external links, lazy-loads
-    images. Returns Rendered(html, headings)."""
+    images. With diagrams=True, ```mermaid blocks become client-rendered
+    diagrams; with math=True, $…$/$$…$$ become KaTeX-rendered math. `extensions`
+    enables optional markdown-it features (footnote, deflist, typographer).
+    Returns Rendered(html, headings)."""
+    md = _get_md(diagrams, math, extensions)
     env: dict = {}
-    tokens = _MD.parse(markdown, env)
+    tokens = md.parse(markdown, env)
     headings: list[Heading] = []
     used_slugs: set[str] = set()
 
@@ -106,7 +175,7 @@ def render(markdown: str, link_rewrite: Optional[Callable[[str], str]] = None) -
             headings.append(Heading(level=level, text=text, slug=slug))
             # Append a hover anchor link inside the heading's inline children.
             if inline is not None:
-                anchor = _MD.parseInline(
+                anchor = md.parseInline(
                     f' <a class="anchor" href="#{slug}" aria-label="Permalink">#</a>',
                     {},
                 )
@@ -131,7 +200,7 @@ def render(markdown: str, link_rewrite: Optional[Callable[[str], str]] = None) -
 
         i += 1
 
-    html = _MD.renderer.render(tokens, _MD.options, env)
+    html = md.renderer.render(tokens, md.options, env)
     return Rendered(html=html, headings=headings)
 
 

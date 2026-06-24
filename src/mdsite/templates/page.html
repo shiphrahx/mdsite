@@ -6,6 +6,7 @@
 <title>{page_title}</title>
 <meta name="description" content="{description}">
 <link rel="stylesheet" href="{base}assets/style.css">
+{head_extra}
 <script>
 // Apply persisted/preferred theme before paint to avoid a flash.
 (function () {{
@@ -24,7 +25,8 @@
 <body>
 <header class="site-header">
   <button class="nav-toggle" aria-label="Toggle navigation" title="Menu">☰</button>
-  <a class="site-title" href="{base}">{site_title}</a>
+  <a class="site-title" href="{base}">{logo_html}{site_title}</a>
+{header_extra}
   <div class="search">
     <input type="search" id="search-input" placeholder="Search…" autocomplete="off" aria-label="Search">
     <div id="search-results" class="search-results" hidden></div>
@@ -41,9 +43,11 @@
     <article class="markdown-body">
 {content}
     </article>
+{tags_html}
     <nav class="prev-next">
 {prev_next_html}
     </nav>
+{updated_html}
     <footer class="page-footer">{footer}</footer>
   </main>
   <aside class="toc" id="toc">
@@ -52,6 +56,7 @@
 </div>
 <script src="{base}assets/search.js" defer></script>
 <script src="{base}assets/app.js" defer></script>
+{body_extra}
 {live_reload}
 </body>
 </html>

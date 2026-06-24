@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from mdsite.layout import (
+    render_meta_tags,
     render_nav,
     render_page,
     render_prev_next,
@@ -151,6 +152,71 @@ def test_render_page_escapes_title():
     assert "&lt;evil&gt;" in html
 
 
+def test_render_page_head_extra_and_logo():
+    html = render_page(
+        page_title="P",
+        site_title="Site",
+        description="",
+        content="",
+        nav_html="",
+        toc_html="",
+        prev_next_html="",
+        footer="",
+        theme="auto",
+        base="/",
+        head_extra='<link rel="icon" href="/assets/f.ico">',
+        logo_html='<img class="site-logo" src="/assets/l.svg" alt="">',
+    )
+    assert '<link rel="icon" href="/assets/f.ico">' in html
+    # head_extra lands inside <head>, before </head>.
+    assert html.index('rel="icon"') < html.index("</head>")
+    # logo sits inside the site-title link, before the title text.
+    assert html.index("site-logo") < html.index(">Site</a>")
+
+
+def test_render_page_slots_default_empty():
+    html = render_page(
+        page_title="P", site_title="S", description="", content="",
+        nav_html="", toc_html="", prev_next_html="", footer="",
+        theme="auto", base="/",
+    )
+    # Unfilled slots leave no literal placeholder braces behind.
+    assert "{head_extra}" not in html
+    assert "{logo_html}" not in html
+
+
+# ---- render_meta_tags ----
+
+def test_meta_tags_full():
+    html = render_meta_tags(
+        title="My Page", description="A page", url="https://x.com/p/",
+        image="https://x.com/cover.png", site_title="Site",
+    )
+    assert '<meta property="og:title" content="My Page">' in html
+    assert '<meta property="og:url" content="https://x.com/p/">' in html
+    assert '<meta property="og:image" content="https://x.com/cover.png">' in html
+    assert '<meta property="og:site_name" content="Site">' in html
+    # With an image, the Twitter card upgrades to large image.
+    assert '<meta name="twitter:card" content="summary_large_image">' in html
+
+
+def test_meta_tags_omit_empty():
+    html = render_meta_tags(title="T", description="", url=None, image=None,
+                            site_title=None)
+    assert "og:title" in html
+    assert "og:description" not in html
+    assert "og:url" not in html
+    assert "og:image" not in html
+    # No image -> plain summary card.
+    assert '<meta name="twitter:card" content="summary">' in html
+
+
+def test_meta_tags_escape_quotes():
+    html = render_meta_tags(title='He said "hi"', description="", site_title=None)
+    assert '"hi"' not in html  # raw quotes must be escaped inside the attribute
+    assert "&quot;hi&quot;" in html
+
+
 # ---- write_assets ----
 
 def test_write_assets_creates_files(tmp_path):
@@ -166,3 +232,38 @@ def test_write_assets_bundles_pygments_css(tmp_path):
     style = (tmp_path / "assets" / "style.css").read_text(encoding="utf-8")
     assert "Pygments" in style
     assert ".hljs" in style
+
+
+def test_write_assets_bundles_copy_button(tmp_path):
+    write_assets(tmp_path)
+    appjs = (tmp_path / "assets" / "app.js").read_text(encoding="utf-8")
+    style = (tmp_path / "assets" / "style.css").read_text(encoding="utf-8")
+    # Copy-button behaviour ships in app.js (clipboard + execCommand fallback).
+    assert "copy-btn" in appjs
+    assert "navigator.clipboard" in appjs
+    assert "execCommand" in appjs  # works on file:// / plain http too
+    # And the button has styling.
+    assert ".copy-btn" in style
+
+
+def test_write_assets_search_js_has_highlight_and_headings(tmp_path):
+    write_assets(tmp_path)
+    searchjs = (tmp_path / "assets" / "search.js").read_text(encoding="utf-8")
+    # Heading-aware ranking + match highlighting ship in search.js.
+    assert "item.headings" in searchjs
+    assert "<mark>" in searchjs
+    assert "function highlight" in searchjs
+
+
+def test_write_assets_appends_custom_css_last(tmp_path):
+    write_assets(tmp_path, extra_css=".brand { color: hotpink; }")
+    style = (tmp_path / "assets" / "style.css").read_text(encoding="utf-8")
+    assert ".brand { color: hotpink; }" in style
+    # Custom CSS must come AFTER the bundled defaults so its rules win.
+    assert style.index(".brand") > style.index("Pygments")
+
+
+def test_write_assets_no_custom_css_marker_when_empty(tmp_path):
+    write_assets(tmp_path)
+    style = (tmp_path / "assets" / "style.css").read_text(encoding="utf-8")
+    assert "Custom CSS" not in style

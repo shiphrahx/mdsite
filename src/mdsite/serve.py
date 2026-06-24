@@ -65,7 +65,10 @@ class _ReloadHub:
             q.put("reload")
 
 
-def _make_handler(root: Path, hub: _ReloadHub):
+def _make_handler(root: Path, hub: _ReloadHub, base: str = "/"):
+    # Prefix without trailing slash, e.g. "/docs" (empty when base is "/").
+    prefix = base.rstrip("/")
+
     class Handler(SimpleHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, directory=str(root), **kwargs)
@@ -73,9 +76,31 @@ def _make_handler(root: Path, hub: _ReloadHub):
         def log_message(self, *args):  # quiet
             pass
 
+        def _strip_base(self) -> bool:
+            """Map a base-prefixed request path onto the output root so the dev
+            server matches production subfolder hosting. Returns False (after
+            sending a response) when the request can't be served."""
+            if not prefix:
+                return True
+            path = self.path
+            if path == "/":
+                # Convenience: bounce the bare root to the site's base.
+                self.send_response(302)
+                self.send_header("Location", base)
+                self.end_headers()
+                return False
+            if path == prefix or path.startswith(prefix + "/"):
+                self.path = path[len(prefix):] or "/"
+                return True
+            # Outside the base prefix: nothing is served there.
+            self.send_error(404, "Not found (outside base path)")
+            return False
+
         def do_GET(self):  # noqa: N802
             if self.path == "/__mdsite_reload":
                 self._serve_sse()
+                return
+            if not self._strip_base():
                 return
             # Clean-URL support: map /foo/ -> /foo/index.html implicitly is
             # already handled by SimpleHTTPRequestHandler for directories.
@@ -147,12 +172,15 @@ class _RebuildHandler(FileSystemEventHandler):
 
 def serve(src_dir: str, opts: dict | None = None) -> None:
     opts = dict(opts or {})
-    # The dev server roots the site at "/", so output URLs must be root-relative
-    # regardless of any --base meant for production subfolder hosting. Otherwise
-    # /docs/assets/... links 404 against a server rooted at /.
-    if opts.get("base", "/") not in ("/", "", None):
-        print(f"note: ignoring --base {opts['base']} in serve (dev server roots at /)")
-    opts["base"] = "/"
+    # Honor --base in dev too: build with the base prefix and have the handler
+    # strip it, so the dev server mirrors production subfolder hosting. Normalize
+    # to a leading + trailing slash, matching build()'s rule ("docs" -> "/docs/").
+    base = opts.get("base", "/") or "/"
+    if not base.startswith("/"):
+        base = "/" + base
+    if not base.endswith("/"):
+        base = base + "/"
+    opts["base"] = base
     # Wipe output each rebuild so deleted/renamed source pages don't leave
     # stale orphan HTML behind in the dev server.
     opts["clean"] = True
@@ -171,7 +199,7 @@ def serve(src_dir: str, opts: dict | None = None) -> None:
     do_build()
 
     port = _find_free_port(preferred)
-    handler = _make_handler(out, hub)
+    handler = _make_handler(out, hub, base)
     httpd = ThreadingHTTPServer(("127.0.0.1", port), handler)
     httpd.daemon_threads = True
 
@@ -189,7 +217,7 @@ def serve(src_dir: str, opts: dict | None = None) -> None:
     )
     observer.start()
 
-    url = f"http://127.0.0.1:{port}/"
+    url = f"http://127.0.0.1:{port}{base}"
     print(f"mdsite serving {url}  (watching {src})")
     print("Press Ctrl+C to stop.")
     try:

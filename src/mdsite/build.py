@@ -2,18 +2,31 @@
 
 from __future__ import annotations
 
+import json
 import shutil
+from html import escape
 from pathlib import Path, PurePosixPath
 
 import frontmatter
 
+from .cache import RenderCache, cache_path_for, decode_headings
 from .config import load_config, make_exclude_matcher
+from .feed import collect_feed_entries, write_feed
+from .lastmod import last_updated
 from .nav import Page, build_nav, is_index_file, prev_next_map
-from .render import first_h1, render, slugify
+from .render import first_h1, normalize_extensions, render, slugify
 from .layout import (
-    render_nav, render_page, render_prev_next, render_toc, write_assets,
+    render_meta_tags, render_nav, render_page, render_prev_next, render_toc,
+    write_assets, write_vendor_asset, write_vendor_tree,
 )
 from .search import write_search_index, write_sitemap
+from .versions import (
+    default_version, normalize_versions, redirect_html, render_version_switcher,
+)
+from .tags import (
+    collect_tags, normalize_tags, render_tag_chips, render_tag_index_content,
+    render_tag_page_content,
+)
 
 MD_EXT = {".md", ".markdown"}
 
@@ -25,6 +38,21 @@ def _walk(root: Path) -> list[str]:
         if p.is_file():
             out.append(p.relative_to(root).as_posix())
     return out
+
+
+def copy_to_assets(src: Path, out: Path, rel: str, base: str) -> str | None:
+    """Copy a source-relative file into out/assets/, returning its base-relative
+    URL (e.g. '/assets/logo.svg'), or None if the source file is missing."""
+    source = src / rel
+    name = PurePosixPath(rel).name
+    try:
+        data = source.read_bytes()
+    except OSError:
+        return None
+    assets = out / "assets"
+    assets.mkdir(parents=True, exist_ok=True)
+    (assets / name).write_bytes(data)
+    return f"{base}assets/{name}"
 
 
 def output_path_for(rel: str) -> str:
@@ -53,8 +81,12 @@ def url_for(out_path: str, base: str) -> str:
     return joined or "/"
 
 
-def _make_link_rewrite(rel: str, url_map: dict):
-    """Per-file rewriter: resolve a relative .md href to its clean URL."""
+def _make_link_rewrite(rel: str, url_map: dict, broken: list | None = None):
+    """Per-file rewriter: resolve a relative .md href to its clean URL.
+
+    A relative .md/.markdown target that is not in url_map (a typo, or a link
+    to an excluded/draft page that will 404) is recorded in `broken` as
+    (source_rel, original_href) when a collector list is supplied."""
     from_dir = PurePosixPath(rel).parent
 
     def rewrite(href: str) -> str:
@@ -77,12 +109,56 @@ def _make_link_rewrite(rel: str, url_map: dict):
         norm = "/".join(parts)
         url = url_map.get(norm)
         if not url:
+            if broken is not None:
+                broken.append((rel, href))
             return href
         if query:
             url = f"{url}?{query}"
         return f"{url}#{frag}" if frag else url
 
     return rewrite
+
+
+def _build_versioned(src: Path, out: Path, base: str, opts: dict,
+                     config: dict, live_reload: str) -> dict:
+    """Build each documentation version into out/<slug>/ and write a root
+    redirect to the default version. Every version shares the top-level config
+    (minus `versions`) and shows a header switcher."""
+    versions = normalize_versions(config["versions"])
+
+    if opts.get("clean"):
+        shutil.rmtree(out, ignore_errors=True)
+    out.mkdir(parents=True, exist_ok=True)
+
+    shared = {k: v for k, v in config.items() if k != "versions"}
+    total = 0
+    for v in versions:
+        sub_src = src / v["dir"]
+        slug = v["slug"]
+        switcher = render_version_switcher(versions, slug, base)
+        sub_opts = {
+            **opts,
+            "out": str(out / slug),
+            "base": f"{base}{slug}/",
+            "clean": False,            # whole out already cleaned above
+            "_config": shared,
+            "header_extra": switcher,
+        }
+        result = build(str(sub_src), sub_opts, live_reload)
+        total += result["page_count"]
+
+    # Root bounces to the default version.
+    default = default_version(versions)
+    (out / "index.html").write_text(
+        redirect_html(f"{base}{default['slug']}/"), encoding="utf-8"
+    )
+    print(f"Built {len(versions)} version(s), {total} page(s) -> {out}")
+    return {
+        "page_count": total,
+        "out": str(out),
+        "versions": [v["slug"] for v in versions],
+        "default_version": default["slug"],
+    }
 
 
 def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict:
@@ -103,9 +179,21 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
     if not src.is_dir():
         raise RuntimeError(f"source is not a directory: {src_dir}")
 
-    config = load_config(src)
+    # In a versioned build the orchestrator passes the parent config down via
+    # "_config" so every version shares the top-level settings.
+    config = opts.get("_config") or load_config(src)
+
+    # Versioned docs: build each version subtree, unless we're already inside a
+    # per-version build (signalled by "_config").
+    if config.get("versions") and "_config" not in opts:
+        return _build_versioned(src, out, base, opts, config, live_reload)
+
     is_excluded = make_exclude_matcher(config.get("exclude", []))
     site_title = opts.get("title") or config.get("title") or src.name
+    diagrams = bool(config.get("diagrams", False))
+    math = bool(config.get("math", False))
+    extensions = normalize_extensions(config.get("markdown"))
+    header_extra = opts.get("header_extra", "")
 
     all_files = [f for f in _walk(src) if not is_excluded(f)]
     md_files = [f for f in all_files if PurePosixPath(f).suffix.lower() in MD_EXT]
@@ -165,15 +253,44 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
         p["rel"]: url_for(output_path_for(p["rel"]), base) for p in parsed
     }
 
+    # Incremental render cache. The signature folds in feature flags and the
+    # whole url map, so cache entries are only reused when link rewriting would
+    # produce identical HTML; structural changes invalidate everything.
+    incremental = bool(config.get("incremental", False))
+    cache = RenderCache(cache_path_for(out), incremental)
+    signature = json.dumps(
+        {"diagrams": diagrams, "math": math, "ext": sorted(extensions),
+         "urls": url_map},
+        sort_keys=True,
+    )
+
     # Pass 1: render -> page records.
     pages: list[Page] = []
     records: list[dict] = []
     seen_outputs: dict[str, str] = {}
+    broken_links: list[tuple[str, str]] = []
     for entry in parsed:
         rel, data, content = entry["rel"], entry["data"], entry["content"]
 
-        rendered = render(content, link_rewrite=_make_link_rewrite(rel, url_map))
-        title = data.get("title") or first_h1(rendered.headings) or PurePosixPath(rel).stem
+        key = cache.key(content, signature) if incremental else ""
+        cached = cache.get(key) if incremental else None
+        if cached is not None:
+            html = cached["html"]
+            headings = decode_headings(cached["headings"])
+            for href in cached["broken"]:
+                broken_links.append((rel, href))
+        else:
+            page_broken: list[tuple[str, str]] = []
+            rendered = render(
+                content,
+                link_rewrite=_make_link_rewrite(rel, url_map, page_broken),
+                diagrams=diagrams, math=math, extensions=extensions,
+            )
+            html, headings = rendered.html, rendered.headings
+            broken_links.extend(page_broken)
+            cache.put(key, html, headings, [h for _, h in page_broken])
+
+        title = data.get("title") or first_h1(headings) or PurePosixPath(rel).stem
 
         out_rel = output_path_for(rel)
         if out_rel in seen_outputs:
@@ -189,9 +306,11 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
             order=order, is_index=is_index_file(rel),
         ))
         records.append({
+            "rel": rel,
             "out_rel": out_rel, "title": title,
-            "html": rendered.html, "headings": rendered.headings,
+            "html": html, "headings": headings,
             "url": url_map[rel],
+            "meta": data,
         })
 
     tree, ordered = build_nav(pages)
@@ -205,15 +324,111 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
     # side), so render it once instead of per page.
     nav_html = render_nav(tree, base)
 
+    # Site-wide head/header extras (favicon + logo), identical on every page.
+    head_extra_parts: list[str] = []
+    favicon = config.get("favicon")
+    if favicon:
+        url = copy_to_assets(src, out, favicon, base)
+        if url:
+            head_extra_parts.append(f'<link rel="icon" href="{escape(url, quote=True)}">')
+        else:
+            print(f"warn: favicon file not found: {favicon} — skipping")
+    logo_html = ""
+    logo = config.get("logo")
+    if logo:
+        url = copy_to_assets(src, out, logo, base)
+        if url:
+            logo_html = f'<img class="site-logo" src="{escape(url, quote=True)}" alt="">'
+        else:
+            print(f"warn: logo file not found: {logo} — skipping")
+    # Atom feed: built from pages carrying a front-matter `date`.
+    feed_entries = collect_feed_entries(records) if config.get("feed", True) else []
+    if feed_entries:
+        feed_url = f"{base}feed.xml"
+        head_extra_parts.append(
+            f'<link rel="alternate" type="application/atom+xml" '
+            f'title="{escape(site_title, quote=True)}" '
+            f'href="{escape(feed_url, quote=True)}">'
+        )
+
+    # Optional client libraries loaded at body end (vendored locally, offline).
+    body_extra_parts: list[str] = []
+    if diagrams:
+        mer = write_vendor_asset(out, "mermaid.min.js")
+        body_extra_parts.append(
+            f'<script src="{escape(base + mer, quote=True)}"></script>\n'
+            '<script>(function(){if(!window.mermaid)return;'
+            "var dark=document.documentElement.getAttribute('data-theme')==='dark';"
+            "mermaid.initialize({startOnLoad:true,theme:dark?'dark':'default'});})();"
+            "</script>"
+        )
+    if math:
+        katex_root = write_vendor_tree(out, "katex")
+        # Stylesheet must load in <head>; fonts resolve relative to the CSS.
+        head_extra_parts.append(
+            f'<link rel="stylesheet" '
+            f'href="{escape(base + katex_root + "/katex.min.css", quote=True)}">'
+        )
+        body_extra_parts.append(
+            f'<script src="{escape(base + katex_root + "/katex.min.js", quote=True)}"></script>\n'
+            '<script>(function(){if(!window.katex)return;'
+            'function r(sel,disp){document.querySelectorAll(sel).forEach(function(el){'
+            'try{katex.render(el.textContent,el,{throwOnError:false,displayMode:disp});}'
+            'catch(e){}});}'
+            "r('.math.inline',false);r('.math.block',true);})();</script>"
+        )
+    body_extra = "\n".join(body_extra_parts)
+    # head_extra_parts may have grown (KaTeX CSS) after the feed block built it.
+    site_head_extra = "".join(head_extra_parts)
+
+    last_updated_mode = config.get("last_updated")
+    social_meta = config.get("social_meta", True)
+    site_url = (config.get("site_url") or "").rstrip("/")
+    default_og_image = config.get("og_image")
+
+    def _abs_url(path: str) -> str:
+        """Absolutize a base-relative path against site_url when configured."""
+        if not path or "://" in path:
+            return path
+        if not path.startswith("/"):
+            path = base + path
+        return site_url + path if site_url else path
+
     # Pass 2: assemble + write each page with full template context.
     for rec in records:
         toc_html = render_toc(rec["headings"])
+        updated_html = ""
+        date = last_updated(src, rec["rel"], last_updated_mode)
+        if date:
+            updated_html = (
+                f'<div class="page-updated">Last updated: '
+                f'<time datetime="{date}">{date}</time></div>'
+            )
         nb = neighbors.get(rec["url"], {"prev": None, "next": None})
         prev_next_html = render_prev_next(nb["prev"], nb["next"], base)
+
+        tags_html = render_tag_chips(normalize_tags(rec["meta"].get("tags")), base)
+
+        # Per-page description (front matter) falls back to the site description.
+        page_desc = rec["meta"].get("description") or description
+        head_extra = site_head_extra
+        if social_meta:
+            image = rec["meta"].get("image") or default_og_image
+            og_html = render_meta_tags(
+                title=rec["title"],
+                description=page_desc,
+                url=_abs_url(rec["url"]),
+                image=_abs_url(image) if image else None,
+                site_title=site_title,
+                og_type="article" if not is_index_file(rec["rel"]) else "website",
+            )
+            if og_html:
+                head_extra = head_extra + "\n" + og_html
+
         page_html = render_page(
             page_title=f'{rec["title"]} · {site_title}' if rec["title"] != site_title else site_title,
             site_title=site_title,
-            description=description,
+            description=page_desc,
             content=rec["html"],
             nav_html=nav_html,
             toc_html=toc_html,
@@ -222,10 +437,70 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
             theme=theme,
             base=base,
             live_reload=live_reload,
+            head_extra=head_extra,
+            logo_html=logo_html,
+            updated_html=updated_html,
+            tags_html=tags_html,
+            body_extra=body_extra,
+            header_extra=header_extra,
         )
         out_abs = out / rec["out_rel"]
         out_abs.parent.mkdir(parents=True, exist_ok=True)
         out_abs.write_text(page_html, encoding="utf-8")
+
+    # Tag listing pages: /tags/ overview + /tags/<slug>/ per tag.
+    tag_urls: list[str] = []
+    tag_map = collect_tags(records) if config.get("tag_pages", True) else {}
+    if tag_map:
+        def _write_tag_page(out_rel: str, page_title: str, content: str) -> str:
+            html = render_page(
+                page_title=f"{page_title} · {site_title}",
+                site_title=site_title, description=description, content=content,
+                nav_html=nav_html, toc_html="",
+                prev_next_html=render_prev_next(None, None, base),
+                footer=footer, theme=theme, base=base, live_reload=live_reload,
+                head_extra=site_head_extra, logo_html=logo_html,
+                body_extra=body_extra, header_extra=header_extra,
+            )
+            dest = out / out_rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(html, encoding="utf-8")
+            return url_for(out_rel, base)
+
+        tag_urls.append(_write_tag_page(
+            "tags/index.html", "Tags", render_tag_index_content(tag_map, base)
+        ))
+        for name, page_list in tag_map.items():
+            tag_urls.append(_write_tag_page(
+                f"tags/{slugify(name)}/index.html",
+                f"Tag: {name}", render_tag_page_content(name, page_list),
+            ))
+
+    # 404 page: most static hosts serve /404.html automatically on a miss.
+    # Asset/nav links carry the base prefix like every other page.
+    if config.get("error_page", True):
+        not_found = render_page(
+            page_title=f"404 · {site_title}",
+            site_title=site_title,
+            description=description,
+            content=(
+                '<h1>Page not found</h1>\n'
+                '<p>The page you’re looking for doesn’t exist or may have moved.</p>\n'
+                f'<p><a href="{base}">← Back to home</a></p>'
+            ),
+            nav_html=nav_html,
+            toc_html="",
+            prev_next_html=render_prev_next(None, None, base),
+            footer=footer,
+            theme=theme,
+            base=base,
+            live_reload=live_reload,
+            head_extra=site_head_extra,
+            logo_html=logo_html,
+            body_extra=body_extra,
+            header_extra=header_extra,
+        )
+        (out / "404.html").write_text(not_found, encoding="utf-8")
 
     # Copy static assets verbatim.
     for rel in assets:
@@ -235,10 +510,39 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
         out_abs.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src / rel, out_abs)
 
-    # Bundled CSS/JS assets + search index + sitemap.
-    write_assets(out)
-    write_search_index(out, records)
-    write_sitemap(out, [r["url"] for r in records], base)
+    # Optional user CSS, appended to the bundled stylesheet (its rules win).
+    extra_css = ""
+    custom_css = config.get("custom_css")
+    if custom_css:
+        css_path = src / custom_css
+        try:
+            extra_css = css_path.read_text(encoding="utf-8")
+        except OSError:
+            print(f"warn: custom_css file not found: {custom_css} — skipping")
 
-    print(f"Built {len(records)} page(s) -> {out}")
-    return {"page_count": len(records), "out": str(out)}
+    # Bundled CSS/JS assets + search index + sitemap.
+    write_assets(out, extra_css=extra_css)
+    write_search_index(out, records)
+    write_sitemap(out, [r["url"] for r in records] + tag_urls, base)
+    if feed_entries:
+        write_feed(out, site_title, description, site_url, base, feed_entries)
+
+    cache.save()
+
+    if config.get("check_links", True) and broken_links:
+        print(f"warn: {len(broken_links)} broken internal link(s):")
+        for source_rel, href in broken_links:
+            print(f"  {source_rel} -> {href}")
+
+    if incremental:
+        print(f"Built {len(records)} page(s) -> {out} "
+              f"(cache: {cache.hits} reused, {cache.misses} rendered)")
+    else:
+        print(f"Built {len(records)} page(s) -> {out}")
+    return {
+        "page_count": len(records),
+        "out": str(out),
+        "broken_links": broken_links,
+        "cache_hits": cache.hits,
+        "cache_misses": cache.misses,
+    }

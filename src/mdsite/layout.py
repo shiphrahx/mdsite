@@ -87,7 +87,9 @@ def render_prev_next(prev, nxt, base: str) -> str:
 
 
 def render_page(*, page_title, site_title, description, content, nav_html,
-                toc_html, prev_next_html, footer, theme, base, live_reload="") -> str:
+                toc_html, prev_next_html, footer, theme, base, live_reload="",
+                head_extra="", logo_html="", updated_html="", tags_html="",
+                body_extra="", header_extra="") -> str:
     return _PAGE.format(
         page_title=escape(page_title),
         site_title=escape(site_title),
@@ -100,15 +102,82 @@ def render_page(*, page_title, site_title, description, content, nav_html,
         theme=escape(theme or "auto"),
         base=base,
         live_reload=live_reload,
+        head_extra=head_extra or "",
+        logo_html=logo_html or "",
+        updated_html=updated_html or "",
+        tags_html=tags_html or "",
+        body_extra=body_extra or "",
+        header_extra=header_extra or "",
     )
 
 
-def write_assets(out_dir: Path, pygments_style: str = "default") -> None:
-    """Copy static template assets + generated highlight CSS into out/assets/."""
+def write_vendor_asset(out_dir: Path, name: str) -> str:
+    """Copy a bundled third-party asset (templates/vendor/<name>) into
+    out/assets/vendor/. Returns the output-relative path under assets/."""
+    data = resources.files("mdsite").joinpath("templates", "vendor", name).read_bytes()
+    dest = out_dir / "assets" / "vendor"
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / name).write_bytes(data)
+    return f"assets/vendor/{name}"
+
+
+def _copy_traversable(trav, dest: Path) -> None:
+    if trav.is_dir():
+        dest.mkdir(parents=True, exist_ok=True)
+        for child in trav.iterdir():
+            _copy_traversable(child, dest / child.name)
+    else:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(trav.read_bytes())
+
+
+def write_vendor_tree(out_dir: Path, subdir: str) -> str:
+    """Recursively copy a bundled vendor directory (templates/vendor/<subdir>)
+    into out/assets/vendor/<subdir>. Returns the output-relative root path."""
+    root = resources.files("mdsite").joinpath("templates", "vendor", subdir)
+    _copy_traversable(root, out_dir / "assets" / "vendor" / subdir)
+    return f"assets/vendor/{subdir}"
+
+
+def render_meta_tags(*, title, description, url=None, image=None,
+                     site_title=None, og_type="website") -> str:
+    """Open Graph + Twitter Card <meta> tags for social sharing. Only emits a
+    tag when its value is present. Returns a newline-joined string (or '')."""
+    tags: list[str] = []
+
+    def meta(prop_attr, prop, content):
+        if content:
+            tags.append(
+                f'<meta {prop_attr}="{escape(prop, quote=True)}" '
+                f'content="{escape(str(content), quote=True)}">'
+            )
+
+    meta("property", "og:title", title)
+    meta("property", "og:description", description)
+    meta("property", "og:type", og_type)
+    meta("property", "og:url", url)
+    meta("property", "og:image", image)
+    meta("property", "og:site_name", site_title)
+    # Twitter falls back to og:* but card type + image type must be explicit.
+    meta("name", "twitter:card", "summary_large_image" if image else "summary")
+    meta("name", "twitter:title", title)
+    meta("name", "twitter:description", description)
+    meta("name", "twitter:image", image)
+    return "\n".join(tags)
+
+
+def write_assets(out_dir: Path, pygments_style: str = "default",
+                 extra_css: str = "") -> None:
+    """Copy static template assets + generated highlight CSS into out/assets/.
+
+    extra_css (e.g. a user's custom.css) is appended last so its rules win over
+    the bundled defaults — letting users rebrand without forking templates."""
     assets = out_dir / "assets"
     assets.mkdir(parents=True, exist_ok=True)
     # Append Pygments CSS to style.css so it ships as one file.
     style = _load("style.css") + "\n\n/* Syntax highlighting (Pygments) */\n" + pygments_css(pygments_style)
+    if extra_css:
+        style += "\n\n/* Custom CSS (user override) */\n" + extra_css
     (assets / "style.css").write_text(style, encoding="utf-8")
     (assets / "app.js").write_text(_load("app.js"), encoding="utf-8")
     (assets / "search.js").write_text(_load("search.js"), encoding="utf-8")

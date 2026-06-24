@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -168,6 +169,598 @@ def test_config_title_and_exclude(tmp_path):
     assert "Cfg" in (out / "index.html").read_text(encoding="utf-8")
 
 
+def test_custom_css_appended(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    _write(src / "brand.css", ".markdown-body { font-family: Comic Sans; }")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"custom_css": "brand.css"}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    style = (out / "assets" / "style.css").read_text(encoding="utf-8")
+    assert "Comic Sans" in style
+    # The CSS source file itself is not also copied as a standalone asset page.
+    assert not (out / "brand" / "index.html").exists()
+
+
+def test_custom_css_missing_file_warns(tmp_path, capsys):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"custom_css": "nope.css"}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    # Missing custom_css must warn but not abort the build.
+    result = build(str(src), {"out": str(out), "clean": True})
+    assert result["page_count"] == 1
+    assert "custom_css" in capsys.readouterr().out
+
+
+def test_diagrams_disabled_by_default(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n\n```mermaid\ngraph TD; A-->B;\n```\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    assert not (out / "assets" / "vendor" / "mermaid.min.js").exists()
+    assert 'class="mermaid"' not in (out / "index.html").read_text(encoding="utf-8")
+
+
+def test_diagrams_enabled(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n\n```mermaid\ngraph TD; A-->B;\n```\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"diagrams": True}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    # Library vendored locally (offline).
+    mer = out / "assets" / "vendor" / "mermaid.min.js"
+    assert mer.exists() and mer.stat().st_size > 1000
+    home = (out / "index.html").read_text(encoding="utf-8")
+    assert '<pre class="mermaid">' in home
+    assert "assets/vendor/mermaid.min.js" in home
+    assert "mermaid.initialize" in home
+
+
+def test_diagrams_respect_base(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n\n```mermaid\ngraph TD;A-->B;\n```\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"diagrams": True}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True, "base": "/docs/"})
+    home = (out / "index.html").read_text(encoding="utf-8")
+    assert 'src="/docs/assets/vendor/mermaid.min.js"' in home
+
+
+def test_incremental_disabled_by_default(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    assert not (tmp_path / "out.mdsite-cache.json").exists()
+
+
+def test_incremental_reuses_unchanged_pages(tmp_path, monkeypatch):
+    import mdsite.build as build_mod
+
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    _write(src / "a.md", "# A\n\nalpha\n")
+    _write(src / "b.md", "# B\n\nbeta\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"incremental": True}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+
+    # First build: cold cache, everything rendered.
+    r1 = build(str(src), {"out": str(out), "clean": True})
+    assert r1["cache_hits"] == 0 and r1["cache_misses"] == 3
+    assert (tmp_path / "out.mdsite-cache.json").exists()
+
+    # Count real render() calls on the second build.
+    calls = {"n": 0}
+    real_render = build_mod.render
+
+    def counting_render(*a, **k):
+        calls["n"] += 1
+        return real_render(*a, **k)
+
+    monkeypatch.setattr(build_mod, "render", counting_render)
+
+    # Edit only a.md, rebuild (clean wipes output, cache survives alongside it).
+    _write(src / "a.md", "# A\n\nalpha CHANGED\n")
+    r2 = build(str(src), {"out": str(out), "clean": True})
+    # Only the changed page is re-rendered; the other two are reused.
+    assert calls["n"] == 1
+    assert r2["cache_hits"] == 2 and r2["cache_misses"] == 1
+    # Output is still correct/complete.
+    assert "alpha CHANGED" in (out / "a" / "index.html").read_text(encoding="utf-8")
+    assert (out / "b" / "index.html").exists()
+
+
+def test_incremental_output_matches_non_incremental(tmp_path):
+    def make(src):
+        _write(src / "index.md", "# Home\n\n[a](./a.md)\n")
+        _write(src / "a.md", "---\ntitle: A\n---\n# A\n\n```python\nx=1\n```\n")
+
+    src1 = tmp_path / "s1"
+    make(src1)
+    (src1 / "mdsite.config.json").write_text(
+        json.dumps({"title": "Site"}), encoding="utf-8"
+    )
+    out1 = tmp_path / "o1"
+    build(str(src1), {"out": str(out1), "clean": True})
+
+    src2 = tmp_path / "s2"
+    make(src2)
+    (src2 / "mdsite.config.json").write_text(
+        json.dumps({"title": "Site", "incremental": True}), encoding="utf-8"
+    )
+    out2 = tmp_path / "o2"
+    build(str(src2), {"out": str(out2), "clean": True})
+
+    # Rendered article HTML is identical with and without the cache.
+    a1 = (out1 / "a" / "index.html").read_text(encoding="utf-8")
+    a2 = (out2 / "a" / "index.html").read_text(encoding="utf-8")
+    assert a1 == a2
+
+
+def test_incremental_invalidates_on_link_target_change(tmp_path):
+    # When a link target is renamed, the url map changes, so even unedited
+    # pages that link to it must be re-rendered (correctness over reuse).
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n\n[go](./target.md)\n")
+    _write(src / "target.md", "# Target\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"incremental": True}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    assert 'href="/target/"' in (out / "index.html").read_text(encoding="utf-8")
+
+    # Rename target -> renamed; index.md content is unchanged but its link must
+    # now resolve to the new URL.
+    (src / "target.md").rename(src / "renamed.md")
+    _write(src / "index.md", "# Home\n\n[go](./renamed.md)\n")
+    build(str(src), {"out": str(out), "clean": True})
+    home = (out / "index.html").read_text(encoding="utf-8")
+    assert 'href="/renamed/"' in home
+
+
+def test_markdown_extensions_config(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n\nNote[^1]\n\nTerm\n:   Def\n\n[^1]: footnote body\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"markdown": {"footnote": True, "deflist": True}}),
+        encoding="utf-8",
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    home = (out / "index.html").read_text(encoding="utf-8")
+    assert "footnote" in home
+    assert "<dl>" in home
+
+
+def test_markdown_extensions_off_by_default(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n\nTerm\n:   Def\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    assert "<dl>" not in (out / "index.html").read_text(encoding="utf-8")
+
+
+def test_versioned_build(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "v1" / "index.md", "# V1 Home\n")
+    _write(src / "v1" / "page.md", "# V1 Page\n")
+    _write(src / "v2" / "index.md", "# V2 Home\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({
+            "title": "Docs",
+            "versions": [
+                {"label": "v1", "dir": "v1"},
+                {"label": "v2", "dir": "v2", "default": True},
+            ],
+        }),
+        encoding="utf-8",
+    )
+    out = tmp_path / "out"
+    result = build(str(src), {"out": str(out), "clean": True})
+    assert result["versions"] == ["v1", "v2"]
+    assert result["default_version"] == "v2"
+    assert result["page_count"] == 3
+    # Each version built under its own subdir.
+    assert (out / "v1" / "index.html").exists()
+    assert (out / "v1" / "page" / "index.html").exists()
+    assert (out / "v2" / "index.html").exists()
+    # Root redirects to the default version.
+    root = (out / "index.html").read_text(encoding="utf-8")
+    assert "http-equiv=\"refresh\"" in root
+    assert "/v2/" in root
+    # Version pages carry the switcher with version-scoped URLs + shared title.
+    v1 = (out / "v1" / "index.html").read_text(encoding="utf-8")
+    assert "version-switcher" in v1
+    assert 'value="/v2/"' in v1
+    assert "Docs" in v1
+    # Per-version asset/nav URLs are scoped to the version base.
+    assert "/v1/assets/style.css" in v1
+    assert 'href="/v1/page/"' in v1
+
+
+def test_versioned_build_respects_base(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "v1" / "index.md", "# V1\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"versions": ["v1"]}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True, "base": "/docs/"})
+    v1 = (out / "v1" / "index.html").read_text(encoding="utf-8")
+    assert "/docs/v1/assets/style.css" in v1
+    root = (out / "index.html").read_text(encoding="utf-8")
+    assert "/docs/v1/" in root
+
+
+def test_math_disabled_by_default(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n\nEuler: $e^{i\\pi}+1=0$\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    assert not (out / "assets" / "vendor" / "katex").exists()
+    assert 'class="math' not in (out / "index.html").read_text(encoding="utf-8")
+
+
+def test_math_enabled(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n\nEuler: $e^{i\\pi}+1=0$\n\n$$\n\\int_0^1 x\\,dx\n$$\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"math": True}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    # KaTeX vendored locally with fonts (offline).
+    katex_js = out / "assets" / "vendor" / "katex" / "katex.min.js"
+    assert katex_js.exists()
+    assert (out / "assets" / "vendor" / "katex" / "katex.min.css").exists()
+    fonts = list((out / "assets" / "vendor" / "katex" / "fonts").glob("*.woff2"))
+    assert len(fonts) >= 10
+    home = (out / "index.html").read_text(encoding="utf-8")
+    assert '<span class="math inline">' in home
+    assert '<div class="math block">' in home
+    assert "katex.min.css" in home  # in <head>
+    assert "katex.render" in home   # init script
+
+
+def test_math_respects_base(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n\n$x$\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"math": True}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True, "base": "/docs/"})
+    home = (out / "index.html").read_text(encoding="utf-8")
+    assert "/docs/assets/vendor/katex/katex.min.css" in home
+    assert "/docs/assets/vendor/katex/katex.min.js" in home
+
+
+def test_feed_generated_from_dated_pages(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    _write(src / "new.md", "---\ntitle: New\ndate: 2024-03-02\n---\n# New\n")
+    _write(src / "old.md", "---\ntitle: Old\ndate: 2020-01-01\n---\n# Old\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"title": "Blog", "site_url": "https://ex.com"}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    feed = out / "feed.xml"
+    assert feed.exists()
+    xml = feed.read_text(encoding="utf-8")
+    # Newest entry first.
+    assert xml.index("New") < xml.index("Old")
+    assert '<link href="https://ex.com/new/"/>' in xml
+    # Discovery link present in dated + undated pages' <head>.
+    home = (out / "index.html").read_text(encoding="utf-8")
+    assert 'type="application/atom+xml"' in home
+    assert 'href="/feed.xml"' in home
+
+
+def test_no_feed_without_dates(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    assert not (out / "feed.xml").exists()
+    assert "application/atom+xml" not in (out / "index.html").read_text(encoding="utf-8")
+
+
+def test_feed_can_be_disabled(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "---\ndate: 2024-01-01\n---\n# Home\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"feed": False}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    assert not (out / "feed.xml").exists()
+
+
+def test_feed_respects_base(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "---\ndate: 2024-01-01\n---\n# Home\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True, "base": "/docs/"})
+    home = (out / "index.html").read_text(encoding="utf-8")
+    assert 'href="/docs/feed.xml"' in home
+
+
+def test_tags_chips_and_pages(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    _write(src / "a.md", "---\ntitle: A\ntags: [python, cli]\n---\n# A\n")
+    _write(src / "b.md", "---\ntitle: B\ntags:\n  - python\n---\n# B\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    # Chips on the tagged page link to tag pages.
+    a = (out / "a" / "index.html").read_text(encoding="utf-8")
+    assert '<div class="page-tags">' in a
+    assert 'href="/tags/python/"' in a
+    assert 'href="/tags/cli/"' in a
+    # Tag overview + per-tag pages exist.
+    assert (out / "tags" / "index.html").exists()
+    py = (out / "tags" / "python" / "index.html").read_text(encoding="utf-8")
+    assert "Tag: python" in py
+    assert 'href="/a/"' in py and 'href="/b/"' in py
+    # python has 2 pages; cli has 1.
+    idx = (out / "tags" / "index.html").read_text(encoding="utf-8")
+    assert '<span class="tag-count">2</span>' in idx
+    # Tag pages are in the sitemap.
+    sm = (out / "sitemap.xml").read_text(encoding="utf-8")
+    assert "<loc>/tags/python/</loc>" in sm
+
+
+def test_tags_respect_base(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "---\ntags: [x]\n---\n# Home\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True, "base": "/docs/"})
+    home = (out / "index.html").read_text(encoding="utf-8")
+    assert 'href="/docs/tags/x/"' in home
+    assert (out / "tags" / "x" / "index.html").exists()
+
+
+def test_tag_pages_can_be_disabled(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "---\ntags: [x]\n---\n# Home\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"tag_pages": False}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    # No tag pages generated, but chips still render on the page.
+    assert not (out / "tags" / "index.html").exists()
+    assert 'href="/tags/x/"' in (out / "index.html").read_text(encoding="utf-8")
+
+
+def test_no_tags_no_tag_pages(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    assert not (out / "tags").exists()
+    assert "page-tags" not in (out / "index.html").read_text(encoding="utf-8")
+
+
+def test_open_graph_tags_with_site_url(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    _write(src / "post.md", "---\ntitle: Post\ndescription: My post\nimage: /img/c.png\n---\n# Post\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"title": "Site", "site_url": "https://example.com/"}),
+        encoding="utf-8",
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    post = (out / "post" / "index.html").read_text(encoding="utf-8")
+    assert '<meta property="og:title" content="Post">' in post
+    assert '<meta property="og:description" content="My post">' in post
+    assert '<meta property="og:url" content="https://example.com/post/">' in post
+    assert '<meta property="og:image" content="https://example.com/img/c.png">' in post
+    # Non-index pages are og:type article.
+    assert '<meta property="og:type" content="article">' in post
+    # Front-matter description also overrides the <meta name=description>.
+    assert '<meta name="description" content="My post">' in post
+
+
+def test_open_graph_index_is_website_type(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    home = (out / "index.html").read_text(encoding="utf-8")
+    assert '<meta property="og:type" content="website">' in home
+
+
+def test_open_graph_can_be_disabled(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"social_meta": False}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    assert "og:title" not in (out / "index.html").read_text(encoding="utf-8")
+
+
+def test_open_graph_default_image_and_no_site_url(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"og_image": "/share.png"}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    home = (out / "index.html").read_text(encoding="utf-8")
+    # Without site_url, og:image stays root-relative.
+    assert '<meta property="og:image" content="/share.png">' in home
+
+
+def test_broken_link_detected(tmp_path, capsys):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n\n[gone](./missing.md)\n[ok](./real.md)\n")
+    _write(src / "real.md", "# Real\n")
+    out = tmp_path / "out"
+    result = build(str(src), {"out": str(out), "clean": True})
+    assert ("index.md", "./missing.md") in result["broken_links"]
+    # The valid link is not reported.
+    assert all(href != "./real.md" for _, href in result["broken_links"])
+    out_text = capsys.readouterr().out
+    assert "broken internal link" in out_text
+    assert "./missing.md" in out_text
+
+
+def test_broken_link_includes_draft_target(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n\n[d](./secret.md)\n")
+    _write(src / "secret.md", "---\ndraft: true\n---\n# Secret\n")
+    out = tmp_path / "out"
+    result = build(str(src), {"out": str(out), "clean": True})
+    # Links to dropped drafts will 404, so they are reported as broken.
+    assert ("index.md", "./secret.md") in result["broken_links"]
+
+
+def test_no_broken_links_clean(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n\n[ok](./page.md)\n[ext](https://x.com/a.md)\n")
+    _write(src / "page.md", "# Page\n")
+    out = tmp_path / "out"
+    result = build(str(src), {"out": str(out), "clean": True})
+    # External .md URLs are never treated as internal links.
+    assert result["broken_links"] == []
+
+
+def test_check_links_can_be_disabled(tmp_path, capsys):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n\n[gone](./missing.md)\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"check_links": False}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    result = build(str(src), {"out": str(out), "clean": True})
+    # Still collected (for tooling), but not printed as a warning.
+    assert result["broken_links"]
+    assert "broken internal link" not in capsys.readouterr().out
+
+
+def test_404_page_generated(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    _write(src / "page.md", "# Page\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    nf = out / "404.html"
+    assert nf.exists()
+    body = nf.read_text(encoding="utf-8")
+    assert "Page not found" in body
+    # Carries the nav + a home link, and is a full styled page.
+    assert "assets/style.css" in body
+    assert 'href="/page/"' in body  # nav rendered
+
+
+def test_404_page_respects_base(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True, "base": "/docs/"})
+    body = (out / "404.html").read_text(encoding="utf-8")
+    assert "/docs/assets/style.css" in body
+    assert 'href="/docs/"' in body  # home link
+
+
+def test_404_page_can_be_disabled(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"error_page": False}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    assert not (out / "404.html").exists()
+
+
+def test_last_updated_disabled_by_default(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    assert "page-updated" not in (out / "index.html").read_text(encoding="utf-8")
+
+
+def test_last_updated_mtime_mode(tmp_path):
+    import os
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    os.utime(src / "index.md", (1609588800, 1609588800))  # 2021-01-02 UTC
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"last_updated": "mtime"}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    home = (out / "index.html").read_text(encoding="utf-8")
+    assert 'class="page-updated"' in home
+    assert "2021-01-02" in home
+    assert '<time datetime="2021-01-02">' in home
+
+
+def test_logo_and_favicon(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    (src / "logo.svg").write_bytes(b"<svg/>")
+    (src / "fav.ico").write_bytes(b"ICO")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"logo": "logo.svg", "favicon": "fav.ico"}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    # Files copied into assets/ under their basename.
+    assert (out / "assets" / "logo.svg").read_bytes() == b"<svg/>"
+    assert (out / "assets" / "fav.ico").read_bytes() == b"ICO"
+    home = (out / "index.html").read_text(encoding="utf-8")
+    assert '<link rel="icon" href="/assets/fav.ico">' in home
+    assert '<img class="site-logo" src="/assets/logo.svg"' in home
+
+
+def test_logo_favicon_respect_base(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    (src / "logo.svg").write_bytes(b"<svg/>")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"logo": "logo.svg"}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True, "base": "/docs/"})
+    home = (out / "index.html").read_text(encoding="utf-8")
+    assert 'src="/docs/assets/logo.svg"' in home
+
+
+def test_missing_logo_warns(tmp_path, capsys):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"logo": "nope.png", "favicon": "nope.ico"}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    result = build(str(src), {"out": str(out), "clean": True})
+    assert result["page_count"] == 1
+    err = capsys.readouterr().out
+    assert "logo file not found" in err
+    assert "favicon file not found" in err
+
+
 def test_readme_dropped_when_index_present(tmp_path, capsys):
     src = tmp_path / "src"
     _write(src / "index.md", "# Home\n")
@@ -215,7 +808,7 @@ def test_search_index_shape(tmp_path):
     idx = json.loads((out / "search-index.json").read_text(encoding="utf-8"))
     assert isinstance(idx, list)
     rec = idx[0]
-    assert set(rec) == {"title", "url", "text"}
+    assert set(rec) == {"title", "url", "text", "headings"}
     # Body is tag-stripped plain text.
     assert "<" not in rec["text"]
     assert "Hello world with a code span" in rec["text"]
@@ -258,6 +851,36 @@ def test_serve_handler_serves_clean_urls(tmp_path):
         assert "home" in urllib.request.urlopen(base + "/", timeout=2).read().decode()
         # Clean URL /foo/ resolves to foo/index.html.
         assert "foo page" in urllib.request.urlopen(base + "/foo/", timeout=2).read().decode()
+    finally:
+        httpd.shutdown()
+
+
+def test_serve_handler_honors_base(tmp_path):
+    from mdsite.serve import _ReloadHub, _find_free_port, _make_handler
+
+    root = tmp_path / "site"
+    (root / "foo").mkdir(parents=True)
+    (root / "index.html").write_text("<h1>home</h1>", encoding="utf-8")
+    (root / "foo" / "index.html").write_text("<h1>foo page</h1>", encoding="utf-8")
+
+    port = _find_free_port(8990)
+    httpd = ThreadingHTTPServer(
+        ("127.0.0.1", port), _make_handler(root, _ReloadHub(), "/docs/")
+    )
+    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+    t.start()
+    try:
+        base = f"http://127.0.0.1:{port}"
+        # Base-prefixed paths map onto the output root.
+        assert "home" in urllib.request.urlopen(base + "/docs/", timeout=2).read().decode()
+        assert "foo page" in urllib.request.urlopen(base + "/docs/foo/", timeout=2).read().decode()
+        # Bare root redirects to the base path.
+        resp = urllib.request.urlopen(base + "/", timeout=2)
+        assert resp.geturl().endswith("/docs/")
+        # Outside the base prefix -> 404.
+        with pytest.raises(urllib.error.HTTPError) as ei:
+            urllib.request.urlopen(base + "/other/", timeout=2)
+        assert ei.value.code == 404
     finally:
         httpd.shutdown()
 
