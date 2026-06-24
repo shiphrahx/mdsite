@@ -21,6 +21,7 @@ DEFAULTS = {
     "social_meta": True,   # emit Open Graph + Twitter Card meta tags
     "site_url": None,      # absolute site origin (e.g. https://example.com) for og:url/image
     "og_image": None,      # default social share image (path or absolute URL)
+    "tag_pages": True,     # generate /tags/ and /tags/<slug>/ listing pages
 }
 
 

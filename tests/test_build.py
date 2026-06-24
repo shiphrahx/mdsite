@@ -197,6 +197,63 @@ def test_custom_css_missing_file_warns(tmp_path, capsys):
     assert "custom_css" in capsys.readouterr().out
 
 
+def test_tags_chips_and_pages(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    _write(src / "a.md", "---\ntitle: A\ntags: [python, cli]\n---\n# A\n")
+    _write(src / "b.md", "---\ntitle: B\ntags:\n  - python\n---\n# B\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    # Chips on the tagged page link to tag pages.
+    a = (out / "a" / "index.html").read_text(encoding="utf-8")
+    assert '<div class="page-tags">' in a
+    assert 'href="/tags/python/"' in a
+    assert 'href="/tags/cli/"' in a
+    # Tag overview + per-tag pages exist.
+    assert (out / "tags" / "index.html").exists()
+    py = (out / "tags" / "python" / "index.html").read_text(encoding="utf-8")
+    assert "Tag: python" in py
+    assert 'href="/a/"' in py and 'href="/b/"' in py
+    # python has 2 pages; cli has 1.
+    idx = (out / "tags" / "index.html").read_text(encoding="utf-8")
+    assert '<span class="tag-count">2</span>' in idx
+    # Tag pages are in the sitemap.
+    sm = (out / "sitemap.xml").read_text(encoding="utf-8")
+    assert "<loc>/tags/python/</loc>" in sm
+
+
+def test_tags_respect_base(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "---\ntags: [x]\n---\n# Home\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True, "base": "/docs/"})
+    home = (out / "index.html").read_text(encoding="utf-8")
+    assert 'href="/docs/tags/x/"' in home
+    assert (out / "tags" / "x" / "index.html").exists()
+
+
+def test_tag_pages_can_be_disabled(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "---\ntags: [x]\n---\n# Home\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"tag_pages": False}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    # No tag pages generated, but chips still render on the page.
+    assert not (out / "tags" / "index.html").exists()
+    assert 'href="/tags/x/"' in (out / "index.html").read_text(encoding="utf-8")
+
+
+def test_no_tags_no_tag_pages(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    assert not (out / "tags").exists()
+    assert "page-tags" not in (out / "index.html").read_text(encoding="utf-8")
+
+
 def test_open_graph_tags_with_site_url(tmp_path):
     src = tmp_path / "src"
     _write(src / "index.md", "# Home\n")

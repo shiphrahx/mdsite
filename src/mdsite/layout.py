@@ -88,7 +88,7 @@ def render_prev_next(prev, nxt, base: str) -> str:
 
 def render_page(*, page_title, site_title, description, content, nav_html,
                 toc_html, prev_next_html, footer, theme, base, live_reload="",
-                head_extra="", logo_html="", updated_html="") -> str:
+                head_extra="", logo_html="", updated_html="", tags_html="") -> str:
     return _PAGE.format(
         page_title=escape(page_title),
         site_title=escape(site_title),
@@ -104,6 +104,7 @@ def render_page(*, page_title, site_title, description, content, nav_html,
         head_extra=head_extra or "",
         logo_html=logo_html or "",
         updated_html=updated_html or "",
+        tags_html=tags_html or "",
     )
 
 

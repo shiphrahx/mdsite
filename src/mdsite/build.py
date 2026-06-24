@@ -17,6 +17,10 @@ from .layout import (
     write_assets,
 )
 from .search import write_search_index, write_sitemap
+from .tags import (
+    collect_tags, normalize_tags, render_tag_chips, render_tag_index_content,
+    render_tag_page_content,
+)
 
 MD_EXT = {".md", ".markdown"}
 
@@ -279,6 +283,8 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
         nb = neighbors.get(rec["url"], {"prev": None, "next": None})
         prev_next_html = render_prev_next(nb["prev"], nb["next"], base)
 
+        tags_html = render_tag_chips(normalize_tags(rec["meta"].get("tags")), base)
+
         # Per-page description (front matter) falls back to the site description.
         page_desc = rec["meta"].get("description") or description
         head_extra = site_head_extra
@@ -310,10 +316,38 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
             head_extra=head_extra,
             logo_html=logo_html,
             updated_html=updated_html,
+            tags_html=tags_html,
         )
         out_abs = out / rec["out_rel"]
         out_abs.parent.mkdir(parents=True, exist_ok=True)
         out_abs.write_text(page_html, encoding="utf-8")
+
+    # Tag listing pages: /tags/ overview + /tags/<slug>/ per tag.
+    tag_urls: list[str] = []
+    tag_map = collect_tags(records) if config.get("tag_pages", True) else {}
+    if tag_map:
+        def _write_tag_page(out_rel: str, page_title: str, content: str) -> str:
+            html = render_page(
+                page_title=f"{page_title} · {site_title}",
+                site_title=site_title, description=description, content=content,
+                nav_html=nav_html, toc_html="",
+                prev_next_html=render_prev_next(None, None, base),
+                footer=footer, theme=theme, base=base, live_reload=live_reload,
+                head_extra=site_head_extra, logo_html=logo_html,
+            )
+            dest = out / out_rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(html, encoding="utf-8")
+            return url_for(out_rel, base)
+
+        tag_urls.append(_write_tag_page(
+            "tags/index.html", "Tags", render_tag_index_content(tag_map, base)
+        ))
+        for name, page_list in tag_map.items():
+            tag_urls.append(_write_tag_page(
+                f"tags/{slugify(name)}/index.html",
+                f"Tag: {name}", render_tag_page_content(name, page_list),
+            ))
 
     # 404 page: most static hosts serve /404.html automatically on a miss.
     # Asset/nav links carry the base prefix like every other page.
@@ -360,7 +394,7 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
     # Bundled CSS/JS assets + search index + sitemap.
     write_assets(out, extra_css=extra_css)
     write_search_index(out, records)
-    write_sitemap(out, [r["url"] for r in records], base)
+    write_sitemap(out, [r["url"] for r in records] + tag_urls, base)
 
     if config.get("check_links", True) and broken_links:
         print(f"warn: {len(broken_links)} broken internal link(s):")

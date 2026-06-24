@@ -249,6 +249,22 @@ a:hover { text-decoration: underline; }
 .prev-next .pn-dir { font-size: 0.8rem; color: var(--muted); }
 .prev-next .pn-next { text-align: right; }
 
+/* Tags */
+.page-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2em; max-width: var(--max-content); }
+.page-tags .tag, .tag-list .tag {
+  display: inline-block;
+  padding: 2px 10px;
+  font-size: 0.8rem;
+  color: var(--muted);
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+.page-tags .tag:hover { color: var(--fg); border-color: var(--accent); text-decoration: none; }
+.tag-list { list-style: none; padding-left: 0; }
+.tag-list li { margin: 6px 0; }
+.tag-list .tag-count { color: var(--muted); font-size: 0.85rem; }
+
 .page-updated {
   margin-top: 2em;
   color: var(--muted);
