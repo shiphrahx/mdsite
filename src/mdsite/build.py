@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 from html import escape
 from pathlib import Path, PurePosixPath
 
 import frontmatter
 
+from .cache import RenderCache, cache_path_for, decode_headings
 from .config import load_config, make_exclude_matcher
 from .feed import collect_feed_entries, write_feed
 from .lastmod import last_updated
@@ -251,6 +253,17 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
         p["rel"]: url_for(output_path_for(p["rel"]), base) for p in parsed
     }
 
+    # Incremental render cache. The signature folds in feature flags and the
+    # whole url map, so cache entries are only reused when link rewriting would
+    # produce identical HTML; structural changes invalidate everything.
+    incremental = bool(config.get("incremental", False))
+    cache = RenderCache(cache_path_for(out), incremental)
+    signature = json.dumps(
+        {"diagrams": diagrams, "math": math, "ext": sorted(extensions),
+         "urls": url_map},
+        sort_keys=True,
+    )
+
     # Pass 1: render -> page records.
     pages: list[Page] = []
     records: list[dict] = []
@@ -259,11 +272,25 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
     for entry in parsed:
         rel, data, content = entry["rel"], entry["data"], entry["content"]
 
-        rendered = render(
-            content, link_rewrite=_make_link_rewrite(rel, url_map, broken_links),
-            diagrams=diagrams, math=math, extensions=extensions,
-        )
-        title = data.get("title") or first_h1(rendered.headings) or PurePosixPath(rel).stem
+        key = cache.key(content, signature) if incremental else ""
+        cached = cache.get(key) if incremental else None
+        if cached is not None:
+            html = cached["html"]
+            headings = decode_headings(cached["headings"])
+            for href in cached["broken"]:
+                broken_links.append((rel, href))
+        else:
+            page_broken: list[tuple[str, str]] = []
+            rendered = render(
+                content,
+                link_rewrite=_make_link_rewrite(rel, url_map, page_broken),
+                diagrams=diagrams, math=math, extensions=extensions,
+            )
+            html, headings = rendered.html, rendered.headings
+            broken_links.extend(page_broken)
+            cache.put(key, html, headings, [h for _, h in page_broken])
+
+        title = data.get("title") or first_h1(headings) or PurePosixPath(rel).stem
 
         out_rel = output_path_for(rel)
         if out_rel in seen_outputs:
@@ -281,7 +308,7 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
         records.append({
             "rel": rel,
             "out_rel": out_rel, "title": title,
-            "html": rendered.html, "headings": rendered.headings,
+            "html": html, "headings": headings,
             "url": url_map[rel],
             "meta": data,
         })
@@ -500,14 +527,22 @@ def build(src_dir: str, opts: dict | None = None, live_reload: str = "") -> dict
     if feed_entries:
         write_feed(out, site_title, description, site_url, base, feed_entries)
 
+    cache.save()
+
     if config.get("check_links", True) and broken_links:
         print(f"warn: {len(broken_links)} broken internal link(s):")
         for source_rel, href in broken_links:
             print(f"  {source_rel} -> {href}")
 
-    print(f"Built {len(records)} page(s) -> {out}")
+    if incremental:
+        print(f"Built {len(records)} page(s) -> {out} "
+              f"(cache: {cache.hits} reused, {cache.misses} rendered)")
+    else:
+        print(f"Built {len(records)} page(s) -> {out}")
     return {
         "page_count": len(records),
         "out": str(out),
         "broken_links": broken_links,
+        "cache_hits": cache.hits,
+        "cache_misses": cache.misses,
     }

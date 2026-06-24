@@ -235,6 +235,101 @@ def test_diagrams_respect_base(tmp_path):
     assert 'src="/docs/assets/vendor/mermaid.min.js"' in home
 
 
+def test_incremental_disabled_by_default(tmp_path):
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    assert not (tmp_path / "out.mdsite-cache.json").exists()
+
+
+def test_incremental_reuses_unchanged_pages(tmp_path, monkeypatch):
+    import mdsite.build as build_mod
+
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n")
+    _write(src / "a.md", "# A\n\nalpha\n")
+    _write(src / "b.md", "# B\n\nbeta\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"incremental": True}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+
+    # First build: cold cache, everything rendered.
+    r1 = build(str(src), {"out": str(out), "clean": True})
+    assert r1["cache_hits"] == 0 and r1["cache_misses"] == 3
+    assert (tmp_path / "out.mdsite-cache.json").exists()
+
+    # Count real render() calls on the second build.
+    calls = {"n": 0}
+    real_render = build_mod.render
+
+    def counting_render(*a, **k):
+        calls["n"] += 1
+        return real_render(*a, **k)
+
+    monkeypatch.setattr(build_mod, "render", counting_render)
+
+    # Edit only a.md, rebuild (clean wipes output, cache survives alongside it).
+    _write(src / "a.md", "# A\n\nalpha CHANGED\n")
+    r2 = build(str(src), {"out": str(out), "clean": True})
+    # Only the changed page is re-rendered; the other two are reused.
+    assert calls["n"] == 1
+    assert r2["cache_hits"] == 2 and r2["cache_misses"] == 1
+    # Output is still correct/complete.
+    assert "alpha CHANGED" in (out / "a" / "index.html").read_text(encoding="utf-8")
+    assert (out / "b" / "index.html").exists()
+
+
+def test_incremental_output_matches_non_incremental(tmp_path):
+    def make(src):
+        _write(src / "index.md", "# Home\n\n[a](./a.md)\n")
+        _write(src / "a.md", "---\ntitle: A\n---\n# A\n\n```python\nx=1\n```\n")
+
+    src1 = tmp_path / "s1"
+    make(src1)
+    (src1 / "mdsite.config.json").write_text(
+        json.dumps({"title": "Site"}), encoding="utf-8"
+    )
+    out1 = tmp_path / "o1"
+    build(str(src1), {"out": str(out1), "clean": True})
+
+    src2 = tmp_path / "s2"
+    make(src2)
+    (src2 / "mdsite.config.json").write_text(
+        json.dumps({"title": "Site", "incremental": True}), encoding="utf-8"
+    )
+    out2 = tmp_path / "o2"
+    build(str(src2), {"out": str(out2), "clean": True})
+
+    # Rendered article HTML is identical with and without the cache.
+    a1 = (out1 / "a" / "index.html").read_text(encoding="utf-8")
+    a2 = (out2 / "a" / "index.html").read_text(encoding="utf-8")
+    assert a1 == a2
+
+
+def test_incremental_invalidates_on_link_target_change(tmp_path):
+    # When a link target is renamed, the url map changes, so even unedited
+    # pages that link to it must be re-rendered (correctness over reuse).
+    src = tmp_path / "src"
+    _write(src / "index.md", "# Home\n\n[go](./target.md)\n")
+    _write(src / "target.md", "# Target\n")
+    (src / "mdsite.config.json").write_text(
+        json.dumps({"incremental": True}), encoding="utf-8"
+    )
+    out = tmp_path / "out"
+    build(str(src), {"out": str(out), "clean": True})
+    assert 'href="/target/"' in (out / "index.html").read_text(encoding="utf-8")
+
+    # Rename target -> renamed; index.md content is unchanged but its link must
+    # now resolve to the new URL.
+    (src / "target.md").rename(src / "renamed.md")
+    _write(src / "index.md", "# Home\n\n[go](./renamed.md)\n")
+    build(str(src), {"out": str(out), "clean": True})
+    home = (out / "index.html").read_text(encoding="utf-8")
+    assert 'href="/renamed/"' in home
+
+
 def test_markdown_extensions_config(tmp_path):
     src = tmp_path / "src"
     _write(src / "index.md", "# Home\n\nNote[^1]\n\nTerm\n:   Def\n\n[^1]: footnote body\n")
