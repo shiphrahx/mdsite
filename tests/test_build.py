@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -492,6 +493,36 @@ def test_serve_handler_serves_clean_urls(tmp_path):
         assert "home" in urllib.request.urlopen(base + "/", timeout=2).read().decode()
         # Clean URL /foo/ resolves to foo/index.html.
         assert "foo page" in urllib.request.urlopen(base + "/foo/", timeout=2).read().decode()
+    finally:
+        httpd.shutdown()
+
+
+def test_serve_handler_honors_base(tmp_path):
+    from mdsite.serve import _ReloadHub, _find_free_port, _make_handler
+
+    root = tmp_path / "site"
+    (root / "foo").mkdir(parents=True)
+    (root / "index.html").write_text("<h1>home</h1>", encoding="utf-8")
+    (root / "foo" / "index.html").write_text("<h1>foo page</h1>", encoding="utf-8")
+
+    port = _find_free_port(8990)
+    httpd = ThreadingHTTPServer(
+        ("127.0.0.1", port), _make_handler(root, _ReloadHub(), "/docs/")
+    )
+    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+    t.start()
+    try:
+        base = f"http://127.0.0.1:{port}"
+        # Base-prefixed paths map onto the output root.
+        assert "home" in urllib.request.urlopen(base + "/docs/", timeout=2).read().decode()
+        assert "foo page" in urllib.request.urlopen(base + "/docs/foo/", timeout=2).read().decode()
+        # Bare root redirects to the base path.
+        resp = urllib.request.urlopen(base + "/", timeout=2)
+        assert resp.geturl().endswith("/docs/")
+        # Outside the base prefix -> 404.
+        with pytest.raises(urllib.error.HTTPError) as ei:
+            urllib.request.urlopen(base + "/other/", timeout=2)
+        assert ei.value.code == 404
     finally:
         httpd.shutdown()
 
