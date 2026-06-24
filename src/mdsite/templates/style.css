@@ -193,6 +193,26 @@ a:hover { text-decoration: underline; }
   overflow-x: auto;
   border: 1px solid var(--border);
 }
+.markdown-body pre.has-copy { position: relative; }
+.copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 3px 8px;
+  font-size: 0.75rem;
+  font-family: var(--font);
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.markdown-body pre.has-copy:hover .copy-btn,
+.copy-btn:focus { opacity: 1; }
+.copy-btn:hover { color: var(--fg); border-color: var(--accent); }
+.copy-btn.copied { color: var(--accent); border-color: var(--accent); }
 .markdown-body pre code { background: none; padding: 0; font-size: 0.85rem; }
 .markdown-body blockquote {
   margin: 1em 0;

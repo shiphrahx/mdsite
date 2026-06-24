@@ -63,6 +63,52 @@
     }
   });
 
+  // ---- Code block copy buttons ----
+  (function () {
+    var blocks = document.querySelectorAll('.markdown-body pre');
+    if (!blocks.length) return;
+
+    function copyText(text, btn) {
+      function done() {
+        var prev = btn.getAttribute('data-label') || 'Copy';
+        btn.classList.add('copied');
+        btn.textContent = 'Copied';
+        setTimeout(function () {
+          btn.classList.remove('copied');
+          btn.textContent = prev;
+        }, 1500);
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      } else {
+        // Fallback for non-secure contexts (e.g. file://, plain http).
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    }
+
+    blocks.forEach(function (pre) {
+      pre.classList.add('has-copy');
+      var btn = document.createElement('button');
+      btn.className = 'copy-btn';
+      btn.type = 'button';
+      btn.textContent = 'Copy';
+      btn.setAttribute('data-label', 'Copy');
+      btn.setAttribute('aria-label', 'Copy code to clipboard');
+      btn.addEventListener('click', function () {
+        var code = pre.querySelector('code');
+        copyText((code || pre).innerText.replace(/\n$/, ''), btn);
+      });
+      pre.appendChild(btn);
+    });
+  })();
+
   // ---- TOC scroll-sync ----
   var tocLinks = Array.prototype.slice.call(document.querySelectorAll('.toc a'));
   if (tocLinks.length) {

@@ -201,6 +201,18 @@ def test_write_assets_bundles_pygments_css(tmp_path):
     assert ".hljs" in style
 
 
+def test_write_assets_bundles_copy_button(tmp_path):
+    write_assets(tmp_path)
+    appjs = (tmp_path / "assets" / "app.js").read_text(encoding="utf-8")
+    style = (tmp_path / "assets" / "style.css").read_text(encoding="utf-8")
+    # Copy-button behaviour ships in app.js (clipboard + execCommand fallback).
+    assert "copy-btn" in appjs
+    assert "navigator.clipboard" in appjs
+    assert "execCommand" in appjs  # works on file:// / plain http too
+    # And the button has styling.
+    assert ".copy-btn" in style
+
+
 def test_write_assets_appends_custom_css_last(tmp_path):
     write_assets(tmp_path, extra_css=".brand { color: hotpink; }")
     style = (tmp_path / "assets" / "style.css").read_text(encoding="utf-8")
